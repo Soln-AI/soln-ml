@@ -40,9 +40,9 @@ class PSMACOptimizer(BaseHPOptimizer):
                               "cutoff_time": self.per_run_time_limit
                               }
         self.optimizer_list = list()
-        for _ in range(self.n_jobs):
+        for i in range(self.n_jobs):
             self.optimizer_list.append(SMAC(scenario=Scenario(self.scenario_dict),
-                                            rng=np.random.RandomState(None),  # Different seed for different optimizers
+                                            rng=np.random.RandomState(i),  # Different seed for different optimizers
                                             tae_runner=self.evaluator))
         self.trial_cnt = 0
         self.configs = list()
@@ -187,5 +187,4 @@ def _iterate(optimizer, runcount_left, return_hist):
         configuration_space=optimizer.solver.config_space,
         logger=optimizer.solver.logger,
     )
-    print(optimizer.solver.runhistory.data)
     return_hist.append(optimizer.solver.runhistory)

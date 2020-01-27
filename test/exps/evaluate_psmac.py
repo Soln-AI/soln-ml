@@ -1,6 +1,7 @@
 import os
 import sys
 import argparse
+import time
 from ConfigSpace.hyperparameters import UnParametrizedHyperparameter
 
 sys.path.append(os.getcwd())
@@ -18,6 +19,7 @@ parser.add_argument('--n', type=int, default=4)
 parser.add_argument('--algo', type=str, default='extra_trees')
 parser.add_argument('--runcount_limit', type=int, default=50)
 parser.add_argument('--trial', type=int, default=8)
+parser.add_argument('--rep_num', type=int, default=1)
 
 parser.add_argument('--seed', type=int, default=1)
 
@@ -34,15 +36,18 @@ def conduct_hpo(optimizer='smac', dataset='pc4', classifier_id='random_forest', 
     print(set(raw_data.data[1]))
     evaluator = Evaluator(cs.get_default_configuration(), name='hpo', data_node=raw_data)
 
-    if optimizer == 'smac':
-        optimizer = SMACOptimizer(evaluator, cs, evaluation_limit=runcount_limit, output_dir='logs')
-    elif optimizer == 'psmac':
-        optimizer = PSMACOptimizer(evaluator, cs, args.n, evaluation_limit=runcount_limit, output_dir='logs',
-                                   trials_per_iter=args.trial)
-    perf, cost, config = optimizer.iterate()
-    print(perf, cost, config)
-    perf, cost, config = optimizer.iterate()
-    print(perf, cost, config)
+    perf = 0
+    start_time = time.time()
+    for i in range(args.rep_num):
+        if optimizer == 'smac':
+            _optimizer = SMACOptimizer(evaluator, cs, evaluation_limit=runcount_limit, output_dir='logs', seed=i)
+        elif optimizer == 'psmac':
+            _optimizer = PSMACOptimizer(evaluator, cs, args.n, evaluation_limit=runcount_limit, output_dir='logs',
+                                        trials_per_iter=args.trial, seed=i)
+        print(perf)
+        perf += _optimizer.run()
+    print("time:" + str((time.time() - start_time) / args.rep_num))
+    print(perf / args.rep_num)
 
 
 if __name__ == "__main__":
