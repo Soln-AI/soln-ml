@@ -1,5 +1,4 @@
 import time
-from concurrent.futures import ThreadPoolExecutor
 from collections import namedtuple
 from automlToolkit.components.feature_engineering.transformation_graph import *
 from automlToolkit.components.fe_optimizers.base_optimizer import Optimizer
@@ -7,6 +6,7 @@ from automlToolkit.components.fe_optimizers.transformer_manager import Transform
 from automlToolkit.components.evaluator import Evaluator
 from automlToolkit.components.utils.constants import SUCCESS, ERROR, TIMEOUT, MEMORYOUT, CRASHED
 from automlToolkit.utils.decorators import time_limit, TimeoutException
+from automlToolkit.utils.thread_executor import ProcessKillingExecutor
 
 EvaluationResult = namedtuple('EvaluationResult', 'status duration score extra')
 
@@ -107,7 +107,7 @@ class EvaluationBasedOptimizer(Optimizer):
 
         self.logger.debug('=' * 50)
         self.logger.info('Start %d-th FE iteration.' % self.iteration_id)
-
+        trans_set = list()
         # Limit the maximum depth in graph.
         # Avoid the too complex features.
 
@@ -122,90 +122,7 @@ class EvaluationBasedOptimizer(Optimizer):
             )
             self.logger.info('The number of transformations is: %d' % len(trans_set))
             if self.n_jobs > 1:
-                pool = ThreadPoolExecutor(max_workers=self.n_jobs)
-                for transformer in trans_set:
-                    self.logger.debug('[%s][%s]' % (self.model_id, transformer.name))
-
-                    if transformer.type != 0:
-                        self.transformer_manager.add_execution_record(node_.node_id, transformer.type)
-
-                    # @timeout(self.time_limit_per_trans, use_signals=True)
-                    def evaluate(tran, node):
-                        start_time = time.time()
-                        output = tran.operate(node)
-
-                        # Evaluate this node.
-                        if tran.type != 0:
-                            output.depth = node.depth + 1
-                            output.trans_hist.append(tran.type)
-                            score = self.evaluator(self.hp_config, data_node=output, name='fe')
-                            output.score = score
-                        else:
-                            score = output.score
-                        return output, score, time.time() - start_time
-
-                    # Limit the execution and evaluation time for each transformation.
-                    tasks.append(pool.submit(evaluate, transformer, node_))
-
-                # Wait until all tasks finish
-                all_completed = False
-                while not all_completed:
-                    all_completed = True
-                    eval_cnt = 0
-                    for task in tasks:
-                        if not task.done():
-                            all_completed = False
-                        else:
-                            eval_cnt += 1
-                    self.logger.debug("Evaluated transformations: %d/%s" % (eval_cnt, len(tasks)))
-                    # Cancel waited threads if budget runs out
-                    if (self.maximum_evaluation_num is not None and
-                        self.evaluation_count + eval_cnt > self.maximum_evaluation_num) or \
-                            (self.time_budget is not None and
-                             time.time() >= self.start_time + self.time_budget):
-                        self.logger.debug(
-                            '[Budget Runs Out]: %s, %s\n' % (self.maximum_evaluation_num, self.time_budget))
-                        self.is_ended = True
-                        for task in tasks:
-                            task.cancel()
-                        break
-                    time.sleep(0.2)
-
-                for i, task in enumerate(tasks):
-                    duration, status, _score = -1, SUCCESS, -1
-                    transformer = trans_set[i]
-                    extra = ['%d' % _evaluation_cnt, self.model_id, transformer.name]
-                    try:
-                        output_node, _score, duration = task.result()
-                        if _score is None:
-                            status = ERROR
-                        else:
-                            self.temporary_nodes.append(output_node)
-                            self.graph.add_node(output_node)
-                            # Avoid self-loop.
-                            if transformer.type != 0 and node_.node_id != output_node.node_id:
-                                self.graph.add_trans_in_graph(node_, output_node, transformer)
-                            if _score > self.incumbent_score:
-                                self.incumbent_score = _score
-                                self.incumbent = output_node
-                                self.features_hist.append(output_node)
-
-                    except Exception as e:
-                        extra.append(str(e))
-                        self.logger.error('%s: %s' % (transformer.name, str(e)))
-                        status = ERROR
-                        if isinstance(e, TimeoutError):
-                            status = TIMEOUT
-
-                    execution_status.append(
-                        EvaluationResult(status=status,
-                                         duration=duration if duration != -1 else self.time_limit_per_trans,
-                                         score=_score,
-                                         extra=extra))
-                    _evaluation_cnt += 1
-                    self.evaluation_count += 1
-                pool.shutdown(wait=True)
-
+                execution_status = self.parallel_iterate(trans_set, node_)
             else:
                 for transformer in trans_set:
                     self.logger.debug('[%s][%s]' % (self.model_id, transformer.name))
@@ -277,7 +194,7 @@ class EvaluationBasedOptimizer(Optimizer):
         self.logger.info('\n [Current Inc]: %.4f, [Improvement]: %.5f' %
                          (self.incumbent_score, self.incumbent_score - self.baseline_score))
 
-        self.evaluation_num_last_iteration = max(self.evaluation_num_last_iteration, _evaluation_cnt)
+        self.evaluation_num_last_iteration = max(self.evaluation_num_last_iteration, len(trans_set))
 
         # Update the beam set according to their performance.
         if len(self.beam_set) == 0:
@@ -318,3 +235,79 @@ class EvaluationBasedOptimizer(Optimizer):
             # Add Beam_size - 1 global nodes.
             for node in self.global_datanodes[:self.beam_width - 1]:
                 self.beam_set.append(node)
+
+    def parallel_iterate(self, trans_set, node_):
+        _evaluation_cnt = 0
+        execution_status = list()
+        # Store the execution_results.
+        execution_results = [None] * len(trans_set)
+
+        def evaluate(*args):
+            tran, node, run_id, _logger = args[0]
+            print('=>', tran.name, 'started!')
+            start_time, status = time.time(), SUCCESS
+            # Evaluate this node.
+            try:
+                output = tran.operate(node)
+                print(tran.name, 'transform finished!')
+                if tran.type != 0:
+                    output.depth = node.depth + 1
+                    output.trans_hist.append(tran.type)
+                    score = self.evaluator(self.hp_config, data_node=output, name='fe')
+                    output.score = score
+            except Exception as e:
+                extra.append(str(e))
+                _logger.error('%s: %s' % (transformer.name, str(e)))
+                status = ERROR
+                output = None
+            if output is not None and output.score is None:
+                status = ERROR
+            runtime = time.time() - start_time
+            print('===>>', tran.name, 'finished!')
+            return run_id, output, runtime, status
+
+        def timeout_callback(*args):
+            _trans, _, _, _logger = args[0]
+            _logger.info('transformer %s - TIMEOUT.' % _trans.name)
+
+        thread_pool = ProcessKillingExecutor(max_workers=self.n_jobs)
+        input_params = list()
+        for _id, _transformer in enumerate(trans_set):
+            input_params.append((_transformer, node_, _id, self.logger))
+            self.logger.info('[%s][%s]' % (self.model_id, _transformer.name))
+            if _transformer.type != 0:
+                self.transformer_manager.add_execution_record(node_.node_id, _transformer.type)
+
+        result_generator = thread_pool.map(evaluate, input_params,
+                                           timeout=self.time_limit_per_trans,
+                                           callback_timeout=timeout_callback)
+        for item in result_generator:
+            if item is not None:
+                _idx, output_node, runtime, status = item
+                execution_results[_idx] = [output_node, runtime, status]
+
+        for _id, _result in execution_results:
+            if _result is None or _result[2] != SUCCESS:
+                continue
+            output_node, runtime, status = _result
+            _score = output_node.score
+            transformer = trans_set[_id]
+            extra = ['%d' % _evaluation_cnt, self.model_id, transformer.name]
+
+            self.temporary_nodes.append(output_node)
+            self.graph.add_node(output_node)
+            # Avoid self-loop.
+            if transformer.type != 0 and node_.node_id != output_node.node_id:
+                self.graph.add_trans_in_graph(node_, output_node, transformer)
+            if _score > self.incumbent_score:
+                self.incumbent_score = _score
+                self.incumbent = output_node
+                self.features_hist.append(output_node)
+
+            execution_status.append(
+                EvaluationResult(status=status, duration=runtime,
+                                 score=_score, extra=extra)
+            )
+            _evaluation_cnt += 1
+            self.evaluation_count += 1
+        return execution_status
