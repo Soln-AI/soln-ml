@@ -4,6 +4,7 @@ import numpy as np
 from smac.scenario.scenario import Scenario
 from smac.facade.smac_facade import SMAC
 from automlToolkit.components.hpo_optimizer.base_optimizer import BaseHPOptimizer
+from automlToolkit.utils.functions import get_increasing_sequence
 
 
 class SMACOptimizer(BaseHPOptimizer):
@@ -15,6 +16,14 @@ class SMACOptimizer(BaseHPOptimizer):
         self.trials_per_iter = trials_per_iter
         self.per_run_time_limit = per_run_time_limit
         self.per_run_mem_limit = per_run_mem_limit
+
+        # Enable early-stopping.
+        self.early_stop_flag = False
+        self.es_trigger_cnt = 0
+
+        # Prevent over-fitting.
+        self.threshold = 5e-3
+        self.threshold_gap = 30
 
         if not output_dir.endswith('/'):
             output_dir += '/'
@@ -76,8 +85,10 @@ class SMACOptimizer(BaseHPOptimizer):
                 self.perfs.append(_reward)
                 self.configs.append(_config)
                 if _reward is not None and _reward > self.incumbent_perf:
-                    self.incumbent_perf = _reward
-                    self.incumbent_config = _config
+                    if len(self.configs) < self.threshold_gap or \
+                            _reward >= get_increasing_sequence(self.perfs)[-self.threshold_gap] + self.threshold:
+                        self.incumbent_perf = _reward
+                        self.incumbent_config = _config
 
             self.trial_cnt = len(runhistory.data.keys())
         if not _flag:

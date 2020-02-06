@@ -7,6 +7,7 @@ from automlToolkit.components.fe_optimizers.transformer_manager import Transform
 from automlToolkit.components.evaluator import Evaluator
 from automlToolkit.components.utils.constants import SUCCESS, ERROR, TIMEOUT, MEMORYOUT, CRASHED
 from automlToolkit.utils.decorators import time_limit, TimeoutException
+from automlToolkit.utils.functions import get_increasing_sequence
 
 EvaluationResult = namedtuple('EvaluationResult', 'status duration score extra')
 
@@ -44,6 +45,11 @@ class EvaluationBasedOptimizer(Optimizer):
         self.evaluation_num_last_iteration = -1
         self.temporary_nodes = list()
         self.execution_history = dict()
+
+        # Prevent over-fitting.
+        self.evaluation_hist = list()
+        self.threshold = 5e-3
+        self.threshold_gap = 150
 
         # Feature set for ensemble learning.
         self.features_hist = list()
@@ -84,6 +90,7 @@ class EvaluationBasedOptimizer(Optimizer):
             _start_time, status, extra = time.time(), SUCCESS, '%d,root_node' % _evaluation_cnt
             try:
                 self.incumbent_score = self.evaluator(self.hp_config, data_node=self.root_node, name='fe')
+                self.evaluation_hist.append(self.incumbent_score)
             except Exception as e:
                 self.logger.error('evaluating root node: %s' % str(e))
                 self.incumbent_score = 0.
@@ -239,9 +246,13 @@ class EvaluationBasedOptimizer(Optimizer):
                             # Avoid self-loop.
                             if transformer.type != 0 and node_.node_id != output_node.node_id:
                                 self.graph.add_trans_in_graph(node_, output_node, transformer)
+                            self.evaluation_hist.append(_score)
                             if _score > self.incumbent_score:
-                                self.incumbent_score = _score
-                                self.incumbent = output_node
+                                if len(self.evaluation_hist) < self.threshold_gap or \
+                                        _score >= get_increasing_sequence(self.evaluation_hist)[-self.threshold_gap]\
+                                        + self.threshold:
+                                    self.incumbent_score = _score
+                                    self.incumbent = output_node
                     except Exception as e:
                         extra.append(str(e))
                         self.logger.error('%s: %s' % (transformer.name, str(e)))

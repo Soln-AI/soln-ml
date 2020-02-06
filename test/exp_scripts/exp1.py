@@ -55,6 +55,12 @@ def evaluate_hmab(algorithms, run_id, dataset='credit', trial_num=200, seed=1, e
     test_accuracy = bandit.score(test_raw_data)
     test_accuracy_with_ens = EnsembleBuilder(bandit).score(test_raw_data)
 
+    print('='*50)
+    print(bandit.optimal_algo_id)
+    for _arm in bandit.arms:
+        print(_arm, [item[2] for item in bandit.sub_bandits[_arm].inc_hist])
+    print('='*50)
+
     print('Dataset          : %s' % dataset)
     print('Validation/Test score : %f - %f' % (validation_accuracy, test_accuracy))
     print('Test score with ensem : %f' % test_accuracy_with_ens)

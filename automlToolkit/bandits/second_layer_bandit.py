@@ -39,6 +39,7 @@ class SecondLayerBandit(object):
         self.optimizer = dict()
         self.evaluation_cost = dict()
         self.inc = dict()
+        self.inc_hist = list()
         self.local_inc = dict()
         for arm in self.arms:
             self.rewards[arm] = list()
@@ -91,6 +92,9 @@ class SecondLayerBandit(object):
             )
         self.inc['hpo'], self.local_inc['hpo'] = self.default_config, self.default_config
 
+    def add_inc_list(self, score):
+        self.inc_hist.append((self.inc['fe'], self.inc['hpo'], score))
+
     def collect_iter_stats(self, _arm, results):
         if _arm == 'fe' and len(self.final_rewards) == 0:
             self.incumbent_perf = self.optimizer['fe'].baseline_score
@@ -112,6 +116,7 @@ class SecondLayerBandit(object):
             else:
                 self.inc['fe'] = self.original_data
             self.incumbent_perf = score
+            self.add_inc_list(score)
 
         for arm_id in self.arms:
             self.update_flag[arm_id] = False
@@ -266,6 +271,8 @@ class SecondLayerBandit(object):
                 self.inc['hpo'] = self.local_inc['hpo']
                 self.inc['fe'] = self.local_inc['fe']
                 self.incumbent_perf = _perf
+                self.add_inc_list(_perf)
+
         elif self.mth == 'alter':
             self.optimize_alternatedly()
         else:
