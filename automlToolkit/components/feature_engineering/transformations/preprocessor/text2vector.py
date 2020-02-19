@@ -8,7 +8,7 @@ class Text2VectorTransformation(Transformer):
         super().__init__("text2vector", 0)
         self.params = param
         self.input_type = [TEXT]
-        self.embedding_dict = build_embeddings_index()
+        #self.embedding_dict = build_embeddings_index()
 
     def operate(self, input_datanode, target_fields=None):
         pass
