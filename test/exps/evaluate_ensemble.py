@@ -27,17 +27,19 @@ parser.add_argument('--algo_num', type=int, default=8)
 parser.add_argument('--trial_num', type=int, default=100)
 parser.add_argument('--rep_num', type=int, default=5)
 parser.add_argument('--start_id', type=int, default=0)
+parser.add_argument('--n', type=int, default=1)
+parser.add_argument('--meta', type=int, default=0)
 parser.add_argument('--time_costs', type=str, default='1200')
 parser.add_argument('--seed', type=int, default=1)
 
-save_dir = './data/ens_result/'
+save_dir = './data/ensemble_evaluation/'
 if not os.path.exists(save_dir):
     os.makedirs(save_dir)
 
 per_run_time_limit = 240
 
 
-def evaluate_1stlayer_bandit(algorithms, run_id, dataset='credit', trial_num=200, seed=1):
+def evaluate_1stlayer_bandit(algorithms, run_id, dataset='credit', trial_num=200, n_jobs=1, meta_configs=0, seed=1):
     task_id = '%s-hmab-%d-%d' % (dataset, len(algorithms), trial_num)
     _start_time = time.time()
     raw_data, test_raw_data = load_train_test_data(dataset, random_state=seed)
@@ -45,6 +47,8 @@ def evaluate_1stlayer_bandit(algorithms, run_id, dataset='credit', trial_num=200
                               output_dir='logs/%s/' % task_id,
                               per_run_time_limit=per_run_time_limit,
                               dataset_name='%s-%d' % (dataset, run_id),
+                              n_jobs=n_jobs,
+                              meta_configs=meta_configs,
                               seed=seed,
                               eval_type='holdout')
     bandit.optimize()
@@ -64,7 +68,8 @@ def evaluate_1stlayer_bandit(algorithms, run_id, dataset='credit', trial_num=200
         test_accuracy_with_ens1 = EnsembleBuilder(bandit).score(test_raw_data)
 
         print('Dataset                     : %s' % dataset)
-        print('Validation score without ens: %f - %f' % (validation_accuracy_without_ens0, validation_accuracy_without_ens1))
+        print('Validation score without ens: %f - %f' % (
+            validation_accuracy_without_ens0, validation_accuracy_without_ens1))
         print("Test score without ensemble : %f" % test_accuracy_without_ens)
         print("Test score with ensemble    : %f - %f" % (test_accuracy_with_ens0, test_accuracy_with_ens1))
 
@@ -72,13 +77,14 @@ def evaluate_1stlayer_bandit(algorithms, run_id, dataset='credit', trial_num=200
         with open(save_path, 'wb') as f:
             stats = [time_cost, test_accuracy_with_ens0, test_accuracy_with_ens1, test_accuracy_without_ens]
             pickle.dump([validation_accuracy_without_ens0, test_accuracy_with_ens1, stats], f)
+    del bandit
     return time_cost
 
 
 def load_hmab_time_costs(start_id, rep, dataset, n_algo, trial_num):
     task_id = '%s-hmab-%d-%d' % (dataset, n_algo, trial_num)
     time_costs = list()
-    for run_id in range(start_id, start_id+rep):
+    for run_id in range(start_id, start_id + rep):
         save_path = save_dir + '%s-%d.pkl' % (task_id, run_id)
         with open(save_path, 'rb') as f:
             time_cost = pickle.load(f)[2][0]
@@ -116,15 +122,16 @@ def ensemble_implementation_examples(bandit: FirstLayerBandit, test_data: DataNo
                 _, estimator = get_estimator(config)
                 # print(X_train.shape, X_test.shape)
                 estimator.fit(X_train, y_train)
-                y_pred = estimator.predict_proba(X_valid)
-                train_predictions.append(y_pred)
-                y_pred = estimator.predict_proba(X_test)
-                test_predictions.append(y_pred)
+                y_valid_pred = estimator.predict_proba(X_valid)
+                y_test_pred = estimator.predict_proba(X_test)
+                train_predictions.append(y_valid_pred)
+                test_predictions.append(y_test_pred)
             except Exception as e:
                 print(str(e))
 
     es = EnsembleSelection(ensemble_size=50, task_type=1,
                            metric=accuracy, random_state=np.random.RandomState(seed))
+    assert len(train_predictions) == len(test_predictions)
     es.fit(train_predictions, y_valid, identifiers=None)
     y_pred = es.predict(test_predictions)
     y_pred = np.argmax(y_pred, axis=-1)
@@ -135,7 +142,7 @@ def ensemble_implementation_examples(bandit: FirstLayerBandit, test_data: DataNo
 def evaluate_autosklearn(algorithms, rep_id, trial_num=100,
                          dataset='credit', time_limit=1200, seed=1,
                          enable_ens=True, enable_meta_learning=False):
-    print('%s\nDataset: %s, Run_id: %d, Budget: %d.\n%s' % ('='*50, dataset, rep_id, time_limit, '='*50))
+    print('%s\nDataset: %s, Run_id: %d, Budget: %d.\n%s' % ('=' * 50, dataset, rep_id, time_limit, '=' * 50))
     ausk_id = 'ausk' if enable_ens else 'ausk-no-ens'
     ausk_id += '-meta' if enable_meta_learning else ''
     task_id = '%s-%s-%d-%d' % (dataset, ausk_id, len(algorithms), trial_num)
@@ -199,6 +206,8 @@ if __name__ == "__main__":
     trial_num = args.trial_num
     start_id = args.start_id
     rep = args.rep_num
+    n_jobs = args.n
+    meta_configs = args.meta
     methods = args.methods.split(',')
     time_costs = [int(item) for item in args.time_costs.split(',')]
     np.random.seed(args.seed)
@@ -214,7 +223,9 @@ if __name__ == "__main__":
     
     """
 
-    algorithms = ['k_nearest_neighbors', 'libsvm_svc', 'random_forest', 'adaboost']
+    # algorithms = ['k_nearest_neighbors', 'libsvm_svc', 'random_forest', 'adaboost']
+    algorithms = ['extra_trees', 'sgd',
+                  'decision_tree', 'passive_aggressive']
     if algo_num == 8:
         algorithms = ['passive_aggressive', 'k_nearest_neighbors', 'libsvm_svc', 'sgd',
                       'adaboost', 'random_forest', 'extra_trees', 'decision_tree']
@@ -237,21 +248,22 @@ if __name__ == "__main__":
                 time_costs = [median] * rep
                 print(median, time_costs)
 
-            for run_id in range(start_id, start_id+rep):
+            for run_id in range(start_id, start_id + rep):
                 seed = int(seeds[run_id])
                 if mth == 'hmab':
                     time_cost = evaluate_1stlayer_bandit(algorithms, run_id,
-                                                         dataset, trial_num=trial_num, seed=seed)
+                                                         dataset, trial_num=trial_num, seed=seed, n_jobs=n_jobs,
+                                                         meta_configs=meta_configs)
                 elif mth == 'ausk':
-                    time_cost = time_costs[run_id-start_id]
+                    time_cost = time_costs[run_id - start_id]
                     evaluate_autosklearn(algorithms, run_id, trial_num,
                                          dataset, time_cost, seed=seed)
                 elif mth == 'ausk-no-ens':
-                    time_cost = time_costs[run_id-start_id]
+                    time_cost = time_costs[run_id - start_id]
                     evaluate_autosklearn(algorithms, run_id, trial_num, dataset,
                                          time_cost, seed=seed, enable_ens=False)
                 elif mth == 'ausk-full':
-                    time_cost = time_costs[run_id-start_id]
+                    time_cost = time_costs[run_id - start_id]
                     evaluate_autosklearn(algorithms, run_id, trial_num, dataset,
                                          time_cost, seed=seed, enable_meta_learning=True)
                 else:
@@ -293,7 +305,7 @@ if __name__ == "__main__":
                     results.append([val_acc, test_acc_no_ens, test_acc_ens])
                 if len(results) == rep:
                     results = np.array(results)
-                    print('%s-%s' % (dataset, mth), '='*20)
+                    print('%s-%s' % (dataset, mth), '=' * 20)
                     stats_ = zip(np.mean(results, axis=0), np.std(results, axis=0))
                     string = ''
                     for mean_t, std_t in stats_:
@@ -308,7 +320,7 @@ if __name__ == "__main__":
                         else:
                             row_data.append(u'%.3f\u00B1%.3f' % (mean_, std_))
                 else:
-                    row_data.extend(['-']*3)
+                    row_data.extend(['-'] * 3)
 
             tbl_data.append(row_data)
         print(tabulate.tabulate(tbl_data, headers, tablefmt='github'))

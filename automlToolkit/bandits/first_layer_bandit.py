@@ -5,28 +5,39 @@ from scipy.stats import norm
 from typing import List
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import StratifiedShuffleSplit
+from autosklearn.constants import *
 from automlToolkit.components.feature_engineering.transformation_graph import DataNode, TransformationGraph
 from automlToolkit.bandits.second_layer_bandit import SecondLayerBandit
 from automlToolkit.utils.logging_utils import setup_logger, get_logger
 from automlToolkit.components.evaluator import get_estimator
+from automlToolkit.components.meta_learning.meta_learning import evaluate_metalearning_configs
+from automlToolkit.utils.metalearning import get_meta_learning_configs
 
 
 class FirstLayerBandit(object):
     def __init__(self, trial_num, classifier_ids: List[str], data: DataNode,
                  per_run_time_limit=300, output_dir=None,
-                 dataset_name='default_dataset_name',
+                 dataset_name='default_dataset',
                  tmp_directory='logs',
                  eval_type='cv',
-                 share_feature=False, logging_config=None, seed=1):
+                 share_feature=False,
+                 meta_configs=0,
+                 n_jobs=1,
+                 logging_config=None,
+                 seed=1):
+        """
+        :param classifier_ids: subset of {'adaboost','bernoulli_nb','decision_tree','extra_trees','gaussian_nb','gradient_boosting',
+        'gradient_boosting','k_nearest_neighbors','lda','liblinear_svc','libsvm_svc','multinomial_nb','passive_aggressive','qda',
+        'random_forest','sgd'}
+        """
         self.original_data = data.copy_()
         self.trial_num = trial_num
+        self.n_jobs = n_jobs
         self.alpha = 4
         self.B = 0.01
         self.seed = seed
         self.shared_mode = share_feature
         np.random.seed(self.seed)
-
-        self.dataset_name = dataset_name
 
         # Best configuration.
         self.optimal_algo_id = None
@@ -34,13 +45,33 @@ class FirstLayerBandit(object):
         self.best_lower_bounds = None
 
         # Set up backend.
+        self.dataset_name = dataset_name
         self.tmp_directory = tmp_directory
         self.logging_config = logging_config
         if not os.path.exists(self.tmp_directory):
             os.makedirs(self.tmp_directory)
         logger_name = "%s-%s" % (__class__.__name__, self.dataset_name)
         self.logger = self._get_logger(logger_name)
-        
+
+        # Meta-learning setting
+        self.meta_configs = None
+        if meta_configs is not None and isinstance(meta_configs, int) and meta_configs > 0:
+            try:
+                if len(set(self.original_data.data[1])) == 2:
+                    self.meta_configs = get_meta_learning_configs(self.original_data.data[0],
+                                                                  self.original_data.data[1],
+                                                                  BINARY_CLASSIFICATION,
+                                                                  metric='accuracy',
+                                                                  num_cfgs=meta_configs)
+                else:
+                    self.meta_configs = get_meta_learning_configs(self.original_data.data[0],
+                                                                  self.original_data.data[1],
+                                                                  MULTICLASS_CLASSIFICATION,
+                                                                  metric='accuracy',
+                                                                  num_cfgs=meta_configs)
+            except Exception as e:
+                self.logger.info('Meta-configs not found!')
+
         # Bandit settings.
         self.incumbent_perf = -1.
         self.arms = classifier_ids
@@ -48,6 +79,7 @@ class FirstLayerBandit(object):
         self.sub_bandits = dict()
         self.evaluation_cost = dict()
         self.fe_datanodes = dict()
+        self.eval_type = eval_type
 
         for arm in self.arms:
             self.rewards[arm] = list()
@@ -59,7 +91,8 @@ class FirstLayerBandit(object):
                 share_fe=self.shared_mode,
                 seed=self.seed,
                 eval_type=eval_type,
-                dataset_id=dataset_name
+                dataset_id=dataset_name,
+                n_jobs=self.n_jobs
             )
 
         self.action_sequence = list()
@@ -74,6 +107,10 @@ class FirstLayerBandit(object):
         self.fe_datanodes[arm] = self.sub_bandits[arm].fetch_local_incumbents()
 
     def optimize(self, strategy='explore_first'):
+        if self.meta_configs is not None:
+            evaluate_metalearning_configs(self, n_jobs=self.n_jobs)
+            self.trial_num -= 1
+
         if strategy == 'explore_first':
             self.optimize_explore_first()
         elif strategy == 'exp3':
@@ -118,6 +155,10 @@ class FirstLayerBandit(object):
                 hpo_optimizer = self.sub_bandits[algo_id].optimizer['hpo']
 
                 train_data_candidates = [inc['fe'], local_inc['fe'], self.sub_bandits[algo_id].original_data]
+                for _feature_set in fe_optimizer.features_hist:
+                    if _feature_set not in train_data_candidates:
+                        train_data_candidates.append(_feature_set)
+
                 train_data_list, test_data_list = list(), list()
                 for item in train_data_candidates:
                     if item not in train_data_list:
@@ -175,20 +216,24 @@ class FirstLayerBandit(object):
             # print(sum(test_data_node.data[0] == tmp_valid_data.data[0]))
             # print(sum(test_data_node.data[1] == tmp_valid_data.data[1]))
 
-            assert test_data_node == tmp_valid_data
+            if not (test_data_node == tmp_valid_data):
+                flag = (test_data_node.data[0] == tmp_valid_data.data[0])
+                print(flag)
+                print(sum(flag))
 
-        # Build the ML estimator.
-        _, estimator = get_estimator(config)
         X_train, y_train = train_data_node.data
         X_test, y_test = test_data_node.data
         self.logger.info('X_train/test shapes: %s, %s' % (str(X_train.shape), str(X_test.shape)))
 
-        estimator.fit(X_train, y_train)
+        # Build the ML estimator.
+        from automlToolkit.components.evaluator import fetch_predict_estimator
+        estimator = fetch_predict_estimator(config, X_train, y_train)
+
         y_pred = estimator.predict(test_data_node.data[0])
         if phase == 'validation':
-            print('='*50)
+            print('=' * 50)
             print(accuracy_score(y_pred, y_test))
-            print('='*50)
+            print('=' * 50)
         return y_pred
 
     def train_valid_split(self, node: DataNode):
@@ -223,14 +268,14 @@ class FirstLayerBandit(object):
         arm_cnts = np.zeros(K)
 
         for iter_id in range(1, 1 + self.trial_num):
-            if iter_id <= C*K:
-                arm_idx = (iter_id-1) % K
+            if iter_id <= C * K:
+                arm_idx = (iter_id - 1) % K
                 _arm = self.arms[arm_idx]
             else:
                 samples = list()
                 for _id in range(K):
                     idx = 2 * _id
-                    sample = norm.rvs(loc=params[idx], scale=params[idx+1])
+                    sample = norm.rvs(loc=params[idx], scale=params[idx + 1])
                     sample = params[idx] if sample < params[idx] else sample
                     samples.append(sample)
                 arm_idx = np.argmax(samples)
@@ -258,7 +303,7 @@ class FirstLayerBandit(object):
                 _mu = np.mean(_rewards)
                 _std = np.std(_rewards)
                 idx = 2 * _id
-                params[idx], params[idx+1] = _mu, _std
+                params[idx], params[idx + 1] = _mu, _std
 
     def optimize_sw_ucb(self):
         # Initialize the parameters.
@@ -274,7 +319,7 @@ class FirstLayerBandit(object):
 
         for iter_id in range(1, 1 + self.trial_num):
             if iter_id <= K:
-                arm_idx = iter_id-1
+                arm_idx = iter_id - 1
                 _arm = self.arms[arm_idx]
             else:
                 # Choose the arm according to SW-UCB.
@@ -284,7 +329,7 @@ class FirstLayerBandit(object):
                 for id in range(K):
                     past_rewards = [item for idx, item in zip(_action_ids, _rewards) if idx == id]
                     X_sum = 0. if len(past_rewards) == 0 else np.sum(past_rewards)
-                    X_t[id] = 1./N_t[id] * X_sum
+                    X_t[id] = 1. / N_t[id] * X_sum
                     c = np.log(np.min([iter_id, tau]))
                     c_t[id] = B * np.sqrt(epsilon * c / N_t[id])
                     _It[id] = X_t[id] + c_t[id]
@@ -329,14 +374,14 @@ class FirstLayerBandit(object):
 
         for iter_id in range(1, 1 + self.trial_num):
             if iter_id <= K:
-                arm_idx = iter_id-1
+                arm_idx = iter_id - 1
                 _arm = self.arms[arm_idx]
             else:
                 # Choose the arm according to D-UCB.
                 _It = np.zeros(K)
                 n_t = np.sum(N_t)
                 for id in range(K):
-                    X_t[id] = 1./N_t[id] * X_ac[id]
+                    X_t[id] = 1. / N_t[id] * X_ac[id]
                     c_t[id] = 2 * B * np.sqrt(epsilon * np.log(n_t) / N_t[id])
                     _It[id] = X_t[id] + c_t[id]
                 arm_idx = np.argmax(_It)
@@ -372,7 +417,7 @@ class FirstLayerBandit(object):
         estimated_cumulative_loss = np.zeros(K)
 
         for iter_id in range(1, 1 + self.trial_num):
-            eta = np.sqrt(np.log(K) / (iter_id*K))
+            eta = np.sqrt(np.log(K) / (iter_id * K))
             # Draw an arm according to p distribution.
             arm_idx = np.random.choice(K, 1, p=p_distri)[0]
             _arm = self.arms[arm_idx]
@@ -389,8 +434,8 @@ class FirstLayerBandit(object):
             estimated_loss = loss / p_distri[arm_idx]
             estimated_cumulative_loss[arm_idx] += estimated_loss
             # Update the probability distribution over arms.
-            tmp_weights = np.exp(-eta*estimated_cumulative_loss)
-            p_distri = tmp_weights/np.sum(tmp_weights)
+            tmp_weights = np.exp(-eta * estimated_cumulative_loss)
+            p_distri = tmp_weights / np.sum(tmp_weights)
         return self.rewards
 
     def optimize_explore_first(self):
@@ -399,7 +444,8 @@ class FirstLayerBandit(object):
         arm_candidate = self.arms.copy()
         self.best_lower_bounds = np.zeros(arm_num)
         _iter_id = 0
-        
+        assert arm_num * self.alpha <= self.trial_num
+
         while _iter_id < self.trial_num:
             if _iter_id < arm_num * self.alpha:
                 _arm = self.arms[_iter_id % arm_num]
@@ -435,12 +481,13 @@ class FirstLayerBandit(object):
                     self.logger.info('Rewards for pulling %s = %.4f' % (_arm, reward))
                     _iter_id += 1
 
+            if _iter_id >= arm_num * self.alpha:
                 # Update the upper/lower bound estimation.
                 upper_bounds, lower_bounds = list(), list()
                 for _arm in arm_candidate:
                     rewards = self.rewards[_arm]
-                    slope = (rewards[-1] - rewards[-self.alpha])/self.alpha
-                    upper_bound = np.min([1.0, rewards[-1] + slope*(self.trial_num - _iter_id)])
+                    slope = (rewards[-1] - rewards[-self.alpha]) / self.alpha
+                    upper_bound = np.min([1.0, rewards[-1] + slope * (self.trial_num - _iter_id)])
                     upper_bounds.append(upper_bound)
                     lower_bounds.append(rewards[-1])
                     self.best_lower_bounds[self.arms.index(_arm)] = rewards[-1]
@@ -479,13 +526,13 @@ class FirstLayerBandit(object):
                         self.nbest_algo_ids.append(_arm)
                 assert len(self.nbest_algo_ids) > 0
 
-                self.logger.info('='*50)
+                self.logger.info('=' * 50)
                 self.logger.info('Best_algo_perf:    %s' % str(_best_perf))
                 self.logger.info('Best_algo_id:      %s' % str(self.optimal_algo_id))
                 self.logger.info('Arm candidates:    %s' % str(self.arms))
                 self.logger.info('Best_lower_bounds: %s' % str(self.best_lower_bounds))
                 self.logger.info('Nbest_algo_ids   : %s' % str(self.nbest_algo_ids))
-                self.logger.info('='*50)
+                self.logger.info('=' * 50)
 
             # Sync the features data nodes.
             if self.shared_mode and _iter_id >= arm_num * self.alpha \
@@ -509,3 +556,8 @@ class FirstLayerBandit(object):
                      self.logging_config,
                      )
         return get_logger(logger_name)
+
+    def __del__(self):
+        del self.logger
+        for _arm in self.arms:
+            del self.sub_bandits[_arm].optimizer

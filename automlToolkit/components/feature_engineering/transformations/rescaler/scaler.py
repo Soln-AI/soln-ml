@@ -4,12 +4,13 @@ from automlToolkit.components.feature_engineering.transformations.base_transform
 
 
 class ScaleTransformation(Transformer):
-    def __init__(self, scaler='min_max'):
+    def __init__(self, scaler='min_max', **kwargs):
         super().__init__("scaler", 3)
         self.input_type = [DISCRETE, NUMERICAL]
         self.compound_mode = 'in_place'
         self.output_type = NUMERICAL
         self.scaler = scaler
+        self.ignore_flag = False
 
     def get_model(self, param):
         from sklearn.preprocessing import MinMaxScaler, MaxAbsScaler, StandardScaler, RobustScaler
@@ -27,14 +28,27 @@ class ScaleTransformation(Transformer):
 
     @ease_trans
     def operate(self, input_data, target_fields):
+        import numpy as np
         X, y = input_data.data
         X_new = X[:, target_fields]
 
         if not self.model:
             self.model = self.get_model(self.scaler)
             self.model.fit(X_new)
-        _X = self.model.transform(X_new)
 
+        if self.scaler == 'robust':
+            _flag = False
+            for _id in range(X_new.shape[1]):
+                _data = X_new[:, _id]
+                if (np.percentile(_data, 0.75) - np.percentile(_data, 0.25)) > 5.:
+                    _flag = True
+            if not _flag:
+                self.ignore_flag = True
+
+        if not self.ignore_flag:
+            _X = self.model.transform(X_new)
+        else:
+            _X = X_new.copy()
         return _X
 
     @staticmethod

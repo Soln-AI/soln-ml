@@ -14,15 +14,15 @@ from automlToolkit.components.hpo_optimizer.base_optimizer import BaseHPOptimize
 
 class PSMACOptimizer(BaseHPOptimizer):
     def __init__(self, evaluator, config_space, n_jobs=4, time_limit=None, evaluation_limit=200,
-                 per_run_time_limit=600, output_dir='./', trials_per_iter=1, seed=1):
+                 per_run_time_limit=600, per_run_mem_limit=1024, output_dir='./', trials_per_iter=1, seed=1):
         super().__init__(evaluator, config_space, seed)
         self.time_limit = time_limit
         self.evaluation_num_limit = evaluation_limit
         self.trials_per_iter = trials_per_iter
         self.trials_this_run = trials_per_iter
         self.per_run_time_limit = per_run_time_limit
+        self.per_run_mem_limit = per_run_mem_limit
         self.n_jobs = n_jobs
-        self.pool = ThreadPoolExecutor(max_workers=self.n_jobs)
 
         if not output_dir.endswith('/'):
             output_dir += '/'
@@ -40,9 +40,9 @@ class PSMACOptimizer(BaseHPOptimizer):
                               "cutoff_time": self.per_run_time_limit
                               }
         self.optimizer_list = list()
-        for i in range(self.n_jobs):
+        for _ in range(self.n_jobs):
             self.optimizer_list.append(SMAC(scenario=Scenario(self.scenario_dict),
-                                            rng=np.random.RandomState(i),  # Different seed for different optimizers
+                                            rng=np.random.RandomState(None),  # Different seed for different optimizers
                                             tae_runner=self.evaluator))
         self.trial_cnt = 0
         self.configs = list()
@@ -104,8 +104,7 @@ class PSMACOptimizer(BaseHPOptimizer):
             for p in processes:
                 p.join()
 
-            for i in range(self.n_jobs):
-                runhistory = return_hist[i]
+            for runhistory in return_hist:
                 runkeys = list(runhistory.data.keys())
                 for key in runkeys:
                     _reward = 1. - runhistory.data[key][0]
@@ -142,8 +141,7 @@ class PSMACOptimizer(BaseHPOptimizer):
         for p in processes:
             p.join()
 
-        for i in range(self.n_jobs):
-            runhistory = return_hist[i]
+        for runhistory in return_hist:
             runkeys = list(runhistory.data.keys())
             for key in runkeys:
                 _reward = 1. - runhistory.data[key][0]
@@ -187,4 +185,5 @@ def _iterate(optimizer, runcount_left, return_hist):
         configuration_space=optimizer.solver.config_space,
         logger=optimizer.solver.logger,
     )
+    # print(optimizer.solver.runhistory.data)
     return_hist.append(optimizer.solver.runhistory)

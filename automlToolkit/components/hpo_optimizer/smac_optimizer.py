@@ -8,12 +8,13 @@ from automlToolkit.components.hpo_optimizer.base_optimizer import BaseHPOptimize
 
 class SMACOptimizer(BaseHPOptimizer):
     def __init__(self, evaluator, config_space, time_limit=None, evaluation_limit=None,
-                 per_run_time_limit=600, output_dir='./', trials_per_iter=1, seed=1):
+                 per_run_time_limit=600, per_run_mem_limit=1024, output_dir='./', trials_per_iter=1, seed=1):
         super().__init__(evaluator, config_space, seed)
         self.time_limit = time_limit
         self.evaluation_num_limit = evaluation_limit
         self.trials_per_iter = trials_per_iter
         self.per_run_time_limit = per_run_time_limit
+        self.per_run_mem_limit = per_run_mem_limit
 
         if not output_dir.endswith('/'):
             output_dir += '/'
@@ -41,7 +42,7 @@ class SMACOptimizer(BaseHPOptimizer):
         if hp_num == 0:
             self.config_num_threshold = 0
         else:
-            _threshold = int(len(set(self.config_space.sample_configuration(12500))) * 0.8)
+            _threshold = int(len(set(self.config_space.sample_configuration(10000))) * 0.75)
             self.config_num_threshold = _threshold
         self.logger.info('HP_THRESHOLD is: %d' % self.config_num_threshold)
 
