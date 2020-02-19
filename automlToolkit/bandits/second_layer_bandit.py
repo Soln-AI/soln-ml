@@ -38,7 +38,7 @@ class SecondLayerBandit(object):
             self.arms = ['fe', 'hpo']
         else:
             assert mode in ['fe', 'hpo']
-            self.arms = [mode]
+            self.arms = [mode] * 2
         self.rewards = dict()
         self.optimizer = dict()
         self.evaluation_cost = dict()
