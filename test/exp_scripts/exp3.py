@@ -27,7 +27,7 @@ parser.add_argument('--rep_num', type=int, default=5)
 parser.add_argument('--start_id', type=int, default=0)
 parser.add_argument('--time_costs', type=str, default='1200')
 parser.add_argument('--ensemble', type=int, choices=[0, 1], default=0)
-parser.add_argument('--eval_type', type=str, choices=['cv', 'holdout'], default='holdout')
+parser.add_argument('--eval_type', type=str, choices=['cv', 'holdout'], default='cv')
 parser.add_argument('--seed', type=int, default=1)
 parser.add_argument('--mode', type=str, default='both', choices=['fe', 'hpo', 'both'])
 
