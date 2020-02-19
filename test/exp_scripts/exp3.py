@@ -31,7 +31,7 @@ parser.add_argument('--eval_type', type=str, choices=['cv', 'holdout'], default=
 parser.add_argument('--seed', type=int, default=1)
 parser.add_argument('--mode', type=str, default='both', choices=['fe', 'hpo', 'both'])
 
-save_dir = './data/exp_results/exp1/'
+save_dir = './data/exp_results/exp3/'
 if not os.path.exists(save_dir):
     os.makedirs(save_dir)
 
