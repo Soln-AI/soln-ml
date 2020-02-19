@@ -18,7 +18,7 @@ class SecondLayerBandit(object):
                  per_run_mem_limit=5120,
                  eval_type='cv', dataset_id='default',
                  mth='rb', sw_size=3, strategy='avg',
-                 n_jobs=1, seed=1):
+                 n_jobs=1, seed=1, mode='both'):
         self.per_run_time_limit = per_run_time_limit
         self.per_run_mem_limit = per_run_mem_limit
         self.classifier_id = classifier_id
@@ -34,7 +34,11 @@ class SecondLayerBandit(object):
         np.random.seed(self.seed)
 
         # Bandit settings.
-        self.arms = ['fe', 'hpo']
+        if mode == 'both':
+            self.arms = ['fe', 'hpo']
+        else:
+            assert mode in ['fe', 'hpo']
+            self.arms = [mode]
         self.rewards = dict()
         self.optimizer = dict()
         self.evaluation_cost = dict()
@@ -68,9 +72,9 @@ class SecondLayerBandit(object):
                                  name='fe', resampling_strategy=self.evaluation_type,
                                  seed=self.seed)
         self.optimizer['fe'] = EvaluationBasedOptimizer(
-                self.original_data, fe_evaluator,
-                classifier_id, per_run_time_limit, per_run_mem_limit, self.seed,
-                shared_mode=self.share_fe, n_jobs=n_jobs)
+            self.original_data, fe_evaluator,
+            classifier_id, per_run_time_limit, per_run_mem_limit, self.seed,
+            shared_mode=self.share_fe, n_jobs=n_jobs)
         self.inc['fe'], self.local_inc['fe'] = self.original_data, self.original_data
 
         # Build the HPO component.
