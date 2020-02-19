@@ -137,7 +137,7 @@ if __name__ == "__main__":
                     time_cost = evaluate_hmab(algorithms, run_id, dataset,
                                               trial_num=trial_num, seed=seed,
                                               eval_type=eval_type,
-
+                                              mode=mode
                                               )
                 else:
                     raise ValueError('Invalid method name: %s.' % mth)
