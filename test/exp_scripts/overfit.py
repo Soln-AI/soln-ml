@@ -1,5 +1,6 @@
 import os
 import sys
+import numpy as np
 import argparse
 import pickle
 from ConfigSpace.hyperparameters import UnParametrizedHyperparameter
@@ -13,10 +14,10 @@ from automlToolkit.components.evaluator import Evaluator, fetch_predict_estimato
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--datasets', type=str, default='credit')
-# parser.add_argument('--algo', type=str, default='random_forest')
+parser.add_argument('--algo', type=str, default='random_forest, xgradient_boosting, libsvm_svc, adaboost')
 parser.add_argument('--iter_num', type=int, default=100)
 parser.add_argument('--rep_num', type=int, default=5)
-# parser.add_argument('--mode', type=str, default='hpo', choices=['hpo', 'fe'])
+parser.add_argument('--mode', type=str, default='hpo,fe')
 parser.add_argument('--seed', type=int, default=1)
 
 save_dir = './data/exp_results/overfit/'
@@ -105,17 +106,38 @@ if __name__ == '__main__':
     datasets = args.datasets
     iter_num = args.iter_num
     rep = args.rep_num
-
+    algo_list = args.algo.split(',')
+    mode_list = args.mode.split(',')
     dataset_list = datasets.split(',')
     check_datasets(dataset_list)
 
-    mode_list = ['hpo', 'fe']
-    algo_list = ['random_forest', 'xgradient_boosting', 'libsvm_svc', 'adaboost']
     for dataset in dataset_list:
         for algo in algo_list:
+            hpo_val = np.zeros((iter_num,))
+            hpo_test = np.zeros((iter_num,))
+            fe_val = np.zeros((iter_num,))
+            fe_test = np.zeros((iter_num,,))
             for run_id in range(rep):
                 for mode in mode_list:
                     if mode == 'hpo':
                         conduct_hpo(dataset=dataset, classifier_id=algo, iter_num=iter_num, run_id=run_id)
                     elif mode == 'fe':
                         conduct_fe(dataset=dataset, classifier_id=algo, iter_num=iter_num, run_id=run_id)
+                    elif mode == 'plot':
+                        task_hpo_id = 'hpo-%s-%s-%d' % (dataset, algo, iter_num)
+                        task_fe_id = 'fe-%s-%s-%d' % (dataset, algo, iter_num)
+                        save_hpo_path = save_dir + '%s-%d.pkl' % (task_hpo_id, run_id)
+                        save_fe_path = save_dir + '%s-%d.pkl' % (task_fe_id, run_id)
+                        with open(save_hpo_path, 'rb') as f:
+                            val_acc, test_acc = pickle.load(f)
+                            val_acc = np.array(val_acc)
+                            test_acc = np.array(test_acc)
+                            hpo_val += val_acc / rep
+                            hpo_test += test_acc / rep
+
+                        with open(save_fe_path, 'rb') as f:
+                            val_acc, test_acc = pickle.load(f)
+                            val_acc = np.array(val_acc)
+                            test_acc = np.array(test_acc)
+                            fe_val += val_acc / rep
+                            fe_test += test_acc / rep
