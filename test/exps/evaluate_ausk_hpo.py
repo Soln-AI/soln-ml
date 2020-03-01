@@ -69,7 +69,7 @@ def conduct_ausk(dataset='pc4', classifier_id='random_forest', iter_num=100, run
 
     automl = AutoSklearnClassifier(
         time_left_for_this_task=int(time_limit),
-        include_preprocessors=[],
+        include_preprocessors=['no_preprocessing'],
         n_jobs=1,
         include_estimators=['random_forest'],
         ensemble_memory_limit=8192,
@@ -77,7 +77,7 @@ def conduct_ausk(dataset='pc4', classifier_id='random_forest', iter_num=100, run
         ensemble_size=1,
         ensemble_nbest=1,
         initial_configurations_via_metalearning=0,
-        per_run_time_limit=600,
+        per_run_time_limit=30,
         seed=seed,
         resampling_strategy='cv',
         resampling_strategy_arguments={'folds': 5}
@@ -87,6 +87,7 @@ def conduct_ausk(dataset='pc4', classifier_id='random_forest', iter_num=100, run
     X, y = raw_data.data
     automl.fit(X.copy(), y.copy())
     best_result = np.max(automl.cv_results_['mean_test_score'])
+    print(best_result)
     X_test, y_test = test_raw_data.data
     pred = automl.predict(X_test)
     test_perf = accuracy_score(y_test, pred)
