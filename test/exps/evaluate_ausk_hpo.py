@@ -65,7 +65,7 @@ def conduct_hpo(dataset='pc4', classifier_id='random_forest', iter_num=100, run_
 
 def conduct_ausk(dataset='pc4', classifier_id='random_forest', iter_num=100, run_id=0, seed=1, time_limit=3600):
     task_id = 'hpo-%s-%s-%d' % (dataset, classifier_id, iter_num)
-    save_path = save_dir + '%ausk-s-%d.pkl' % (task_id, run_id)
+    save_path = save_dir + 'ausk-%s-%d.pkl' % (task_id, run_id)
 
     automl = AutoSklearnClassifier(
         time_left_for_this_task=int(time_limit),
