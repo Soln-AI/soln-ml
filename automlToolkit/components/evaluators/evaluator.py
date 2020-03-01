@@ -40,9 +40,9 @@ def cross_validation(clf, X, y, n_fold=5, shuffle=True,
                     train_list = pkl.load(f)
             else:
                 train_list = []
-        train_list.append(np.mean(train_scores))
-        with open(save_path, 'wb')as f:
-            pkl.dump(train_list, f)
+            train_list.append(np.mean(train_scores))
+            with open(save_path, 'wb')as f:
+                pkl.dump(train_list, f)
 
         return np.mean(scores)
 
