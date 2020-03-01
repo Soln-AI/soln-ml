@@ -42,7 +42,8 @@ def conduct_hpo(dataset='pc4', classifier_id='random_forest', iter_num=100, run_
 
     optimizer = SMACOptimizer(
         evaluator, cs, trials_per_iter=2,
-        output_dir='logs', per_run_time_limit=180
+        output_dir='logs', per_run_time_limit=180,
+        evaluation_limit=iter_num
     )
 
     start_time = time.time()
