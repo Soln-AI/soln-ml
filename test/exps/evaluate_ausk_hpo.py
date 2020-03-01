@@ -43,7 +43,7 @@ def conduct_hpo(dataset='pc4', classifier_id='random_forest', iter_num=100, run_
     optimizer = SMACOptimizer(
         evaluator, cs, trials_per_iter=2,
         output_dir='logs', per_run_time_limit=180,
-        evaluation_limit=iter_num
+        evaluation_limit=iter_num * 2
     )
 
     start_time = time.time()
@@ -68,7 +68,7 @@ def conduct_ausk(dataset='pc4', classifier_id='random_forest', iter_num=100, run
     save_path = save_dir + '%ausk-s-%d.pkl' % (task_id, run_id)
 
     automl = AutoSklearnClassifier(
-        time_left_for_this_task=time_limit,
+        time_left_for_this_task=int(time_limit),
         include_preprocessors=[],
         n_jobs=1,
         include_estimators=['random_forest'],
