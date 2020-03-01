@@ -42,7 +42,7 @@ def conduct_hpo(dataset='pc4', classifier_id='random_forest', iter_num=100, run_
         output_dir='logs', per_run_time_limit=180
     )
 
-    val_acc_list, test_acc_list = [], [], []
+    val_acc_list, test_acc_list = [], []
     for _iter in range(iter_num):
         perf, _, config = optimizer.iterate()
         val_acc_list.append(perf)
