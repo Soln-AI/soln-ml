@@ -35,7 +35,8 @@ class DataNode(object):
         return DataNode(data=[X, y], feature_type=feat_types)
 
     def copy_(self):
-        new_data = [val.copy() for val in self.data]
+        new_data = list([self.data[0].copy()])
+        new_data.append(None if self.data[1] is None else self.data[1].copy())
         new_node = DataNode(new_data, self.feature_types.copy(), self.task_type)
         new_node.trans_hist = self.trans_hist.copy()
         return new_node
@@ -74,8 +75,13 @@ class DataNode(object):
     def __str__(self):
         from tabulate import tabulate
         tabular_data = list()
-        tabular_data.append(['Feature types', self.feature_types])
-        tabular_data.append(['Data shape', self.shape])
+        if len(self.feature_types) > 8:
+            types_summary = ','.join(self.feature_types[:4])
+            types_summary += ',...,' + ','.join(self.feature_types[-4:])
+        else:
+            types_summary = ','.join(self.feature_types)
+        tabular_data.append(['feature types', types_summary])
+        tabular_data.append(['data shape', '%d, %d' % self.shape])
         tabular_data.append(['#Cat-feature', self.cat_num])
         tabular_data.append(['#NonCat-feature', self.shape[1] - self.cat_num])
         return tabulate(tabular_data, tablefmt="github")

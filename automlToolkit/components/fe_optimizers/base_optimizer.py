@@ -6,11 +6,12 @@ from automlToolkit.utils.logging_utils import get_logger
 
 
 class Optimizer(object, metaclass=abc.ABCMeta):
-    def __init__(self, name, datanode, seed=1):
+    def __init__(self, name, task_type, datanode, seed=1):
         self.name = name
         self._seed = seed
         self.incumbent = datanode
         self.root_node = datanode
+        self.task_type = task_type
         self.graph = TransformationGraph()
         self.graph.add_node(self.root_node)
         self.time_budget = None
@@ -28,6 +29,17 @@ class Optimizer(object, metaclass=abc.ABCMeta):
 
     def get_incumbent(self):
         return self.incumbent
+
+    def get_incumbent_path(self):
+        ref_node = self.get_incumbent()
+        path_ids = self.graph.get_path_nodes(ref_node)
+        self.logger.info('The path ids: %s' % str(path_ids))
+        edge_attrs = list()
+        for node_id in path_ids[1:]:
+            edge = self.graph.get_edge(self.graph.input_edge_dict[node_id])
+            self.logger.info('Transformation: %s - %d' % (edge.transformer.name, edge.transformer.type))
+            edge_attrs.append(edge.transformer.get_attributes())
+        return edge_attrs
 
     def apply(self, data_node: DataNode, ref_node: DataNode):
         path_ids = self.graph.get_path_nodes(ref_node)
