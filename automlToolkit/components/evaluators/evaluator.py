@@ -6,16 +6,19 @@ from sklearn.model_selection import StratifiedKFold, train_test_split, Stratifie
 from automlToolkit.utils.logging_utils import get_logger
 from sklearn.utils.testing import ignore_warnings
 from sklearn.exceptions import ConvergenceWarning
+import os
+import pickle as pkl
 
 
 @ignore_warnings(category=ConvergenceWarning)
 def cross_validation(clf, X, y, n_fold=5, shuffle=True,
-                     random_state=1, fit_params=None):
+                     random_state=1, fit_params=None, save_path=None):
     with warnings.catch_warnings():
         # ignore all caught warnings
         warnings.filterwarnings("ignore")
 
-        kfold = StratifiedKFold(n_splits=n_fold, random_state=1, shuffle=shuffle)
+        kfold = StratifiedKFold(n_splits=n_fold, random_state=random_state, shuffle=shuffle)
+        train_scores = []
         scores = list()
         for train_idx, valid_idx in kfold.split(X, y):
             train_x = X[train_idx]
@@ -25,9 +28,22 @@ def cross_validation(clf, X, y, n_fold=5, shuffle=True,
             _fit_params = dict()
             if len(fit_params) > 0:
                 _fit_params['sample_weight'] = fit_params['sample_weight'][train_idx]
-            clf.fit(train_x, train_y, **_fit_params)
+            clf.fit(train_x, train_y, random_state=random_state, **_fit_params)
             pred = clf.predict(valid_x)
             scores.append(accuracy_score(pred, valid_y))
+            pred = clf.predict(train_x)
+            train_scores.append(accuracy_score(pred, train_y))
+
+        if save_path:
+            if os.path.exists(save_path):
+                with open(save_path, 'rb') as f:
+                    train_list = pkl.load(f)
+            else:
+                train_list = []
+        train_list.append(np.mean(train_scores))
+        with open(save_path, 'wb')as f:
+            pkl.dump(train_list, f)
+
         return np.mean(scores)
 
 
@@ -38,7 +54,7 @@ def holdout_validation(clf, X, y, test_size=0.2,
         # ignore all caught warnings
         warnings.filterwarnings("ignore")
 
-        sss = StratifiedShuffleSplit(n_splits=1, test_size=test_size, random_state=1)
+        sss = StratifiedShuffleSplit(n_splits=1, test_size=test_size, random_state=random_state)
         # X_train, X_test, y_train, y_test = train_test_split(
         #     X, y, test_size=test_size, random_state=random_state, stratify=y)
         for train_index, test_index in sss.split(X, y):
@@ -47,7 +63,7 @@ def holdout_validation(clf, X, y, test_size=0.2,
             _fit_params = dict()
             if len(fit_params) > 0:
                 _fit_params['sample_weight'] = fit_params['sample_weight'][train_index]
-            clf.fit(X_train, y_train, **_fit_params)
+            clf.fit(X_train, y_train, random_state=random_state, **_fit_params)
             y_pred = clf.predict(X_test)
             return accuracy_score(y_test, y_pred)
 
@@ -79,7 +95,7 @@ def fetch_predict_estimator(config, X_train, y_train):
 
 class Evaluator(object):
     def __init__(self, clf_config, data_node=None, name=None,
-                 resampling_strategy='cv', cv=5, seed=1):
+                 resampling_strategy='cv', cv=5, seed=1, save_path=None):
         self.clf_config = clf_config
         self.data_node = data_node
         self.name = name
@@ -90,6 +106,7 @@ class Evaluator(object):
         self.logger = get_logger('Evaluator-%s' % self.name)
         self.init_params = None
         self.fit_params = None
+        self.save_path = save_path
 
     def get_fit_params(self, y, estimator):
         from automlToolkit.components.utils.balancing import get_weights
@@ -131,7 +148,8 @@ class Evaluator(object):
             if self.resampling_strategy == 'cv':
                 score = cross_validation(clf, X_train, y_train,
                                          n_fold=self.cv, random_state=self.seed,
-                                         fit_params=self.fit_params)
+                                         fit_params=self.fit_params,
+                                         save_path=self.save_path)
             elif self.resampling_strategy == 'holdout':
                 score = holdout_validation(clf, X_train, y_train,
                                            random_state=self.seed,
@@ -144,7 +162,7 @@ class Evaluator(object):
             self.logger.info('%s-evaluator: %s' % (self.name, str(e)))
             score = 0.
 
-        fmt_str = '\n'+' '*5 + '==> '
+        fmt_str = '\n' + ' ' * 5 + '==> '
         self.logger.debug('%s%d-Evaluation<%s> | Score: %.4f | Time cost: %.2f seconds | Shape: %s' %
                           (fmt_str, self.eval_id, classifier_id,
                            score, time.time() - start_time, X_train.shape))
