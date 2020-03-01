@@ -28,7 +28,7 @@ def cross_validation(clf, X, y, n_fold=5, shuffle=True,
             _fit_params = dict()
             if len(fit_params) > 0:
                 _fit_params['sample_weight'] = fit_params['sample_weight'][train_idx]
-            clf.fit(train_x, train_y, random_state=random_state, **_fit_params)
+            clf.fit(train_x, train_y, **_fit_params)
             pred = clf.predict(valid_x)
             scores.append(accuracy_score(pred, valid_y))
             pred = clf.predict(train_x)
@@ -63,7 +63,7 @@ def holdout_validation(clf, X, y, test_size=0.2,
             _fit_params = dict()
             if len(fit_params) > 0:
                 _fit_params['sample_weight'] = fit_params['sample_weight'][train_index]
-            clf.fit(X_train, y_train, random_state=random_state, **_fit_params)
+            clf.fit(X_train, y_train, **_fit_params)
             y_pred = clf.predict(X_test)
             return accuracy_score(y_test, y_pred)
 
