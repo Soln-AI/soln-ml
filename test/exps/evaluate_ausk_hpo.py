@@ -64,7 +64,6 @@ def conduct_hpo(dataset='pc4', classifier_id='random_forest', iter_num=100, run_
 
 
 def conduct_ausk(dataset='pc4', classifier_id='random_forest', iter_num=100, run_id=0, seed=1, time_limit=3600):
-    from autosklearn.pipeline.components.classification.random_forest import RandomForest
     task_id = 'hpo-%s-%s-%d' % (dataset, classifier_id, iter_num)
     save_path = save_dir + '%ausk-s-%d.pkl' % (task_id, run_id)
 
@@ -72,7 +71,7 @@ def conduct_ausk(dataset='pc4', classifier_id='random_forest', iter_num=100, run
         time_left_for_this_task=int(time_limit),
         include_preprocessors=['no_preprocessing'],
         n_jobs=1,
-        include_estimators=[RandomForest],
+        include_estimators=['random_forest'],
         ensemble_memory_limit=8192,
         ml_memory_limit=8192,
         ensemble_size=1,
@@ -88,7 +87,7 @@ def conduct_ausk(dataset='pc4', classifier_id='random_forest', iter_num=100, run
     X, y = raw_data.data
     automl.fit(X.copy(), y.copy())
     best_result = np.max(automl.cv_results_['mean_test_score'])
-    print(best_result)
+    automl.refit(X.copy(), y.copy())
     X_test, y_test = test_raw_data.data
     pred = automl.predict(X_test)
     test_perf = accuracy_score(y_test, pred)
