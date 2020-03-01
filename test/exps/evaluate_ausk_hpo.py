@@ -16,6 +16,7 @@ from automlToolkit.components.evaluators.evaluator import Evaluator, fetch_predi
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--datasets', type=str, default='credit')
+parser.add_argument('--algo', type=str, default='random_forest')
 parser.add_argument('--iter_num', type=int, default=100)
 parser.add_argument('--rep_num', type=int, default=5)
 parser.add_argument('--seed', type=int, default=1)
