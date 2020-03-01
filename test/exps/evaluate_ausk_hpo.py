@@ -64,11 +64,10 @@ def conduct_hpo(dataset='pc4', classifier_id='random_forest', iter_num=100, run_
 
 
 def conduct_ausk(dataset='pc4', classifier_id='random_forest', iter_num=100, run_id=0, seed=1, time_limit=3600):
-    from autosklearn.pipeline.components.classification import _classifiers
     task_id = 'hpo-%s-%s-%d' % (dataset, classifier_id, iter_num)
     save_path = save_dir + '%ausk-s-%d.pkl' % (task_id, run_id)
 
-    automl = autosklearn.classification.AutoSklearnClassifier(
+    automl = AutoSklearnClassifier(
         time_left_for_this_task=time_limit,
         include_preprocessors=[],
         n_jobs=1,
