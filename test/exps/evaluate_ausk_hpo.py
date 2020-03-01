@@ -109,18 +109,19 @@ if __name__ == '__main__':
     datasets = args.datasets
     iter_num = args.iter_num
     rep = args.rep_num
-    algo = args.algo
 
     dataset_list = datasets.split(',')
     check_datasets(dataset_list)
 
     mode_list = ['hmab', 'ausk']
+    algo_list = ['random_forest', 'xgradient_boosting', 'libsvm_svc', 'k_nearest_neighbors']
     for dataset in dataset_list:
         for run_id in range(rep):
-            time_limit = None
-            for mode in mode_list:
-                if mode == 'hmab':
-                    time_limit = conduct_hpo(dataset=dataset, classifier_id=algo, iter_num=iter_num, run_id=run_id)
-                elif mode == 'ausk':
-                    conduct_ausk(dataset=dataset, classifier_id=algo, iter_num=iter_num, run_id=run_id,
-                                 time_limit=time_limit)
+            for algo in algo_list:
+                time_limit = None
+                for mode in mode_list:
+                    if mode == 'hmab':
+                        time_limit = conduct_hpo(dataset=dataset, classifier_id=algo, iter_num=iter_num, run_id=run_id)
+                    elif mode == 'ausk':
+                        conduct_ausk(dataset=dataset, classifier_id=algo, iter_num=iter_num, run_id=run_id,
+                                     time_limit=time_limit)
