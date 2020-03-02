@@ -71,7 +71,7 @@ def conduct_ausk(dataset='pc4', classifier_id='random_forest', iter_num=100, run
         time_left_for_this_task=int(time_limit),
         include_preprocessors=['no_preprocessing'],
         n_jobs=1,
-        include_estimators=['random_forest'],
+        include_estimators=[classifier_id],
         ensemble_memory_limit=8192,
         ml_memory_limit=8192,
         ensemble_size=1,
