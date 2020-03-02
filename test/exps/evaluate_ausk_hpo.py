@@ -114,7 +114,7 @@ if __name__ == '__main__':
     check_datasets(dataset_list)
 
     mode_list = ['hmab', 'ausk']
-    algo_list = ['random_forest', 'xgradient_boosting', 'libsvm_svc', 'k_nearest_neighbors']
+    algo_list = ['random_forest', 'xgradient_boosting', 'k_nearest_neighbors']
     for dataset in dataset_list:
         for run_id in range(rep):
             for algo in algo_list:
