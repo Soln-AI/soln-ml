@@ -6,9 +6,9 @@ from automlToolkit.components.utils.configspace_utils import check_for_bool
 
 # TODO: Select top-k features for transformer
 # TODO: By what?
-class PolynomialTransformation(Transformer):
+class PolynomialTransformationRegression(Transformer):
     def __init__(self, degree=2, interaction_only='True', include_bias='False', random_state=None):
-        super().__init__("polynomial", 17)
+        super().__init__("polynomial", 32)
         self.input_type = [DISCRETE, NUMERICAL]
         self.compound_mode = 'concatenate'
 
@@ -28,7 +28,7 @@ class PolynomialTransformation(Transformer):
     @ease_trans
     def operate(self, input_datanode, target_fields):
         from sklearn.preprocessing import PolynomialFeatures
-        from sklearn.feature_selection import SelectKBest, f_classif
+        from sklearn.feature_selection import SelectKBest, f_regression
 
         X, y = input_datanode.data
         X_new = X[:, target_fields]
@@ -42,7 +42,7 @@ class PolynomialTransformation(Transformer):
                 k = 'all'
             else:
                 k = self.topn
-            self.select_model = SelectKBest(score_func=f_classif, k=k)
+            self.select_model = SelectKBest(score_func=f_regression, k=k)
             self.select_model.fit(X_new, y)
 
         X_new = self.select_model.transform(X_new)
