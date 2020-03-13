@@ -6,21 +6,20 @@ from automlToolkit.components.feature_engineering.transformations.base_transform
 from automlToolkit.components.utils.configspace_utils import check_none, check_for_bool
 
 
-class ExtraTreeBasedSelector(Transformer):
-    def __init__(self, n_estimators=100, criterion='gini', min_samples_leaf=1,
-                 min_samples_split=2, max_features=0.5, bootstrap='False', max_leaf_nodes='None',
-                 max_depth='None', min_weight_fraction_leaf=0., min_impurity_decrease=0.,
-                 oob_score=False, n_jobs=-1, random_state=None, verbose=0,
-                 class_weight=None):
-        super().__init__("extra_trees_based_selector", 7)
+class ExtraTreeBasedSelectorRegression(Transformer):
+    def __init__(self, n_estimators=100, criterion='mse', min_samples_leaf=1,
+                 min_samples_split=2, max_features=1., bootstrap='False', max_leaf_nodes='None',
+                 max_depth='15', min_weight_fraction_leaf=0.,
+                 oob_score=False, n_jobs=-1, random_state=None, verbose=0):
+        super().__init__("extra_trees_based_selector_regression", 31)
         self.input_type = [NUMERICAL, DISCRETE, CATEGORICAL]
         self.compound_mode = 'only_new'
 
         self.n_estimators = n_estimators
         self.estimator_increment = 10
-        if criterion not in ("gini", "entropy"):
-            raise ValueError("'criterion' is not in ('gini', 'entropy'): "
-                             "%s" % criterion)
+        if criterion not in ("mse", "friedman_mse", "mae"):
+            raise ValueError("'criterion' is not in ('mse', 'friedman_mse', "
+                             "'mae'): %s" % criterion)
         self.criterion = criterion
         self.min_samples_leaf = min_samples_leaf
         self.min_samples_split = min_samples_split
@@ -29,17 +28,13 @@ class ExtraTreeBasedSelector(Transformer):
         self.max_leaf_nodes = max_leaf_nodes
         self.max_depth = max_depth
         self.min_weight_fraction_leaf = min_weight_fraction_leaf
-        self.min_impurity_decrease = min_impurity_decrease
 
         self.oob_score = oob_score
         self.n_jobs = n_jobs
         self.random_state = random_state
         self.verbose = verbose
-        self.class_weight = class_weight
 
     def operate(self, input_datanode, target_fields=None, sample_weight=None):
-        from sklearn.feature_selection import SelectFromModel
-
         feature_types = input_datanode.feature_types
         X, y = input_datanode.data
         if target_fields is None:
@@ -52,7 +47,16 @@ class ExtraTreeBasedSelector(Transformer):
             irrevalent_fields.remove(field_id)
 
         if self.model is None:
-            from sklearn.ensemble import ExtraTreesClassifier
+            from sklearn.feature_selection import SelectFromModel
+            from sklearn.ensemble import ExtraTreesRegressor
+            self.n_estimators = int(self.n_estimators)
+            self.min_samples_leaf = int(self.min_samples_leaf)
+            self.min_samples_split = int(self.min_samples_split)
+            self.max_features = float(self.max_features)
+            self.bootstrap = check_for_bool(self.bootstrap)
+            self.n_jobs = int(self.n_jobs)
+            self.verbose = int(self.verbose)
+
             if check_none(self.max_leaf_nodes):
                 self.max_leaf_nodes = None
             else:
@@ -63,16 +67,15 @@ class ExtraTreeBasedSelector(Transformer):
             else:
                 self.max_depth = int(self.max_depth)
 
-            self.bootstrap = check_for_bool(self.bootstrap)
-            self.n_jobs = int(self.n_jobs)
-            self.min_impurity_decrease = float(self.min_impurity_decrease)
-            self.max_features = self.max_features
-            self.min_samples_leaf = int(self.min_samples_leaf)
-            self.min_samples_split = int(self.min_samples_split)
-            self.verbose = int(self.verbose)
+            self.min_weight_fraction_leaf = float(self.min_weight_fraction_leaf)
 
-            max_features = int(X_new.shape[1] ** float(self.max_features))
-            estimator = ExtraTreesClassifier(
+            num_features = X.shape[1]
+            max_features = int(
+                float(self.max_features) * (np.log(num_features) + 1))
+            # Use at most half of the features
+            max_features = max(1, min(int(X.shape[1] / 2), max_features))
+
+            estimator = ExtraTreesRegressor(
                 n_estimators=self.n_estimators,
                 criterion=self.criterion,
                 max_depth=self.max_depth,
@@ -81,12 +84,10 @@ class ExtraTreeBasedSelector(Transformer):
                 bootstrap=self.bootstrap,
                 max_features=max_features,
                 max_leaf_nodes=self.max_leaf_nodes,
-                min_impurity_decrease=self.min_impurity_decrease,
                 oob_score=self.oob_score,
                 n_jobs=self.n_jobs,
                 verbose=self.verbose,
-                random_state=self.random_state,
-                class_weight=self.class_weight)
+                random_state=self.random_state)
             estimator.fit(X_new, y, sample_weight=sample_weight)
             self.model = SelectFromModel(estimator=estimator, threshold='mean', prefit=True)
 
@@ -111,29 +112,26 @@ class ExtraTreeBasedSelector(Transformer):
         cs = ConfigurationSpace()
 
         n_estimators = Constant("n_estimators", 100)
-        criterion = CategoricalHyperparameter(
-            "criterion", ["gini", "entropy"], default_value="gini")
-        max_features = UniformFloatHyperparameter("max_features", 0, 1,
-                                                  default_value=0.5, q=0.05)
+        criterion = CategoricalHyperparameter("criterion",
+                                              ["mse", "friedman_mse"])
+        max_features = UniformFloatHyperparameter(
+            "max_features", 0.1, 1.0, default_value=1.0, q=0.05)
 
-        max_depth = UnParametrizedHyperparameter(name="max_depth", value="None")
+        max_depth = UnParametrizedHyperparameter(name="max_depth", value="15")
         max_leaf_nodes = UnParametrizedHyperparameter("max_leaf_nodes", "None")
 
         min_samples_split = UniformIntegerHyperparameter(
             "min_samples_split", 2, 20, default_value=2)
         min_samples_leaf = UniformIntegerHyperparameter(
             "min_samples_leaf", 1, 20, default_value=1)
-        min_weight_fraction_leaf = UnParametrizedHyperparameter(
-            'min_weight_fraction_leaf', 0.)
-        min_impurity_decrease = UnParametrizedHyperparameter(
-            'min_impurity_decrease', 0.)
+        min_weight_fraction_leaf = Constant('min_weight_fraction_leaf', 0.)
 
         bootstrap = CategoricalHyperparameter(
             "bootstrap", ["True", "False"], default_value="False")
 
-        cs.add_hyperparameters([n_estimators, criterion, max_features,
-                                max_depth, max_leaf_nodes, min_samples_split,
+        cs.add_hyperparameters([n_estimators, criterion, max_features, max_depth,
+                                max_leaf_nodes, min_samples_split,
                                 min_samples_leaf, min_weight_fraction_leaf,
-                                min_impurity_decrease, bootstrap])
+                                bootstrap])
 
         return cs

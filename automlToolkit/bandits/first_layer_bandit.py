@@ -9,7 +9,6 @@ from autosklearn.constants import *
 from automlToolkit.components.feature_engineering.transformation_graph import DataNode, TransformationGraph
 from automlToolkit.bandits.second_layer_bandit import SecondLayerBandit
 from automlToolkit.utils.logging_utils import setup_logger, get_logger
-from automlToolkit.components.evaluator import get_estimator
 from automlToolkit.components.meta_learning.meta_learning import evaluate_metalearning_configs
 from automlToolkit.utils.metalearning import get_meta_learning_configs
 
@@ -19,7 +18,7 @@ class FirstLayerBandit(object):
                  per_run_time_limit=300, output_dir=None,
                  dataset_name='default_dataset',
                  tmp_directory='logs',
-                 eval_type='cv',
+                 eval_type='holdout',
                  share_feature=False,
                  meta_configs=0,
                  n_jobs=1,
@@ -188,7 +187,7 @@ class FirstLayerBandit(object):
                 stats[algo_id] = data
         return stats
 
-    def predict(self, test_data: DataNode, phase='test'):
+    def predict(self, test_data: DataNode, phase='test', metric_func=None):
         assert phase in ['test', 'validation']
         best_arm = self.optimal_algo_id
         sub_bandit = self.sub_bandits[best_arm]
@@ -228,19 +227,21 @@ class FirstLayerBandit(object):
         self.logger.info('X_train/test shapes: %s, %s' % (str(X_train.shape), str(X_test.shape)))
 
         # Build the ML estimator.
-        from automlToolkit.components.evaluator import fetch_predict_estimator
+        from automlToolkit.components.evaluators.evaluator import fetch_predict_estimator
         estimator = fetch_predict_estimator(config, X_train, y_train)
 
         y_pred = estimator.predict(test_data_node.data[0])
         if phase == 'validation':
             print('=' * 50)
-            print(accuracy_score(y_pred, y_test))
+            if metric_func is None:
+                metric_func = accuracy_score
+            print(metric_func(y_pred, y_test))
             print('=' * 50)
         return y_pred
 
     def train_valid_split(self, node: DataNode):
         X, y = node.copy_().data
-        sss = StratifiedShuffleSplit(n_splits=1, test_size=0.2, random_state=1)
+        sss = StratifiedShuffleSplit(n_splits=1, test_size=0.33, random_state=1)
         for train_index, test_index in sss.split(X, y):
             X_train, X_val = X[train_index], X[test_index]
             y_train, y_val = y[train_index], y[test_index]
@@ -252,14 +253,13 @@ class FirstLayerBandit(object):
         if metric_func is None:
             metric_func = accuracy_score
         _, valid_data = self.train_valid_split(self.original_data)
-        y_pred = self.predict(valid_data, phase='validation')
+        y_pred = self.predict(valid_data, phase='validation', metric_func=metric_func)
         return metric_func(valid_data.data[1], y_pred)
 
     def score(self, test_data: DataNode, metric_func=None):
         if metric_func is None:
-            from sklearn.metrics.classification import accuracy_score
             metric_func = accuracy_score
-        y_pred = self.predict(test_data)
+        y_pred = self.predict(test_data, metric_func=metric_func)
         return metric_func(test_data.data[1], y_pred)
 
     def optimize_sw_ts(self):

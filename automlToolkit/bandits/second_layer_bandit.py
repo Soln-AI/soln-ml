@@ -1,13 +1,15 @@
 import typing
 import numpy as np
-from timeout_decorator import timeout, TimeoutError
-from automlToolkit.components.evaluator import Evaluator
+from sklearn.model_selection import StratifiedShuffleSplit
+from automlToolkit.components.evaluators.evaluator import Evaluator
 from automlToolkit.utils.logging_utils import get_logger
 from ConfigSpace.hyperparameters import UnParametrizedHyperparameter
 from automlToolkit.components.hpo_optimizer.smac_optimizer import SMACOptimizer
 from automlToolkit.components.hpo_optimizer.psmac_optimizer import PSMACOptimizer
 from automlToolkit.components.feature_engineering.transformation_graph import DataNode
 from automlToolkit.components.fe_optimizers.evaluation_based_optimizer import EvaluationBasedOptimizer
+from automlToolkit.components.evaluators.evaluator import fetch_predict_estimator
+from automlToolkit.utils.decorators import time_limit, TimeoutException
 from automlToolkit.utils.functions import get_increasing_sequence
 
 
@@ -16,9 +18,10 @@ class SecondLayerBandit(object):
                  share_fe=False, output_dir='logs',
                  per_run_time_limit=120,
                  per_run_mem_limit=5120,
-                 eval_type='cv', dataset_id='default',
-                 mth='rb', sw_size=3, strategy='avg',
-                 n_jobs=1, seed=1, mode='both'):
+                 eval_type='holdout', dataset_id='default',
+                 mth='rb', sw_size=3,
+                 n_jobs=1, seed=1,
+                 enable_intersection=True):
         self.per_run_time_limit = per_run_time_limit
         self.per_run_mem_limit = per_run_mem_limit
         self.classifier_id = classifier_id
@@ -27,21 +30,18 @@ class SecondLayerBandit(object):
         self.share_fe = share_fe
         self.output_dir = output_dir
         self.mth = mth
-        self.strategy = strategy
         self.seed = seed
         self.sliding_window_size = sw_size
-        self.logger = get_logger('%s:%s-%d=>%s' % (__class__.__name__, dataset_id, seed, classifier_id))
+        self.logger = get_logger('%s:%s-%d=>%s' % (
+            __class__.__name__, dataset_id, seed, classifier_id))
         np.random.seed(self.seed)
 
         # Bandit settings.
-        if mode == 'both':
-            self.arms = ['fe', 'hpo']
-        else:
-            assert mode in ['fe', 'hpo']
-            self.arms = [mode] * 2
+        self.arms = ['fe', 'hpo']
         self.rewards = dict()
         self.optimizer = dict()
         self.evaluation_cost = dict()
+        # Global incumbent.
         self.inc = dict()
         self.local_inc = dict()
         for arm in self.arms:
@@ -51,13 +51,10 @@ class SecondLayerBandit(object):
         self.action_sequence = list()
         self.final_rewards = list()
         self.incumbent_perf = -1.
-        self.incumbent_source = None
-        self.update_flag = dict()
-        self.imp_rewards = dict()
-        for arm in self.arms:
-            self.update_flag[arm] = True
-            self.imp_rewards[arm] = list()
+        self.early_stopped_flag = False
+        self.enable_intersection = enable_intersection
 
+        # Fetch hyperparameter space.
         from autosklearn.pipeline.components.classification import _classifiers
         clf_class = _classifiers[classifier_id]
         cs = clf_class.get_hyperparameter_search_space()
@@ -72,13 +69,15 @@ class SecondLayerBandit(object):
                                  name='fe', resampling_strategy=self.evaluation_type,
                                  seed=self.seed)
         self.optimizer['fe'] = EvaluationBasedOptimizer(
+            'classification',
             self.original_data, fe_evaluator,
             classifier_id, per_run_time_limit, per_run_mem_limit, self.seed,
             shared_mode=self.share_fe, n_jobs=n_jobs)
         self.inc['fe'], self.local_inc['fe'] = self.original_data, self.original_data
 
         # Build the HPO component.
-        trials_per_iter = len(self.optimizer['fe'].trans_types)
+        # trials_per_iter = len(self.optimizer['fe'].trans_types)
+        trials_per_iter = 4
         hpo_evaluator = Evaluator(self.default_config,
                                   data_node=self.original_data, name='hpo',
                                   resampling_strategy=self.evaluation_type,
@@ -86,11 +85,11 @@ class SecondLayerBandit(object):
         if n_jobs == 1:
             self.optimizer['hpo'] = SMACOptimizer(
                 hpo_evaluator, cs, output_dir=output_dir, per_run_time_limit=per_run_time_limit,
-                trials_per_iter=trials_per_iter // 2, seed=self.seed)
+                trials_per_iter=trials_per_iter, seed=self.seed)
         else:
             self.optimizer['hpo'] = PSMACOptimizer(
                 hpo_evaluator, cs, output_dir=output_dir, per_run_time_limit=per_run_time_limit,
-                trials_per_iter=trials_per_iter // 2, seed=self.seed,
+                trials_per_iter=trials_per_iter, seed=self.seed,
                 n_jobs=n_jobs
             )
         self.inc['hpo'], self.local_inc['hpo'] = self.default_config, self.default_config
@@ -101,14 +100,16 @@ class SecondLayerBandit(object):
             self.final_rewards.append(self.incumbent_perf)
 
         self.logger.info('After %d-th pulling, results: %s' % (self.pull_cnt, results))
+
         score, iter_cost, config = results
 
         if score is None:
             score = 0.0
-
         self.rewards[_arm].append(score)
         self.evaluation_cost[_arm].append(iter_cost)
         self.local_inc[_arm] = config
+
+        # Update global incumbent from FE and HPO.
         if score > self.incumbent_perf:
             self.inc[_arm] = config
             if _arm == 'fe':
@@ -117,53 +118,9 @@ class SecondLayerBandit(object):
                 self.inc['fe'] = self.original_data
             self.incumbent_perf = score
 
-        for arm_id in self.arms:
-            self.update_flag[arm_id] = False
-
-        if len(self.final_rewards) > 0 and self.final_rewards[-1] < self.incumbent_perf:
-            arm_id = 'fe' if _arm == 'hpo' else 'hpo'
-            self.update_flag[arm_id] = True
-
-        if _arm == 'fe':
-            _num_iter = self.optimizer['fe'].evaluation_num_last_iteration // 2
-            self.optimizer['hpo'].trials_per_iter = max(_num_iter, 1)
-
-        if self.mth == 'alter' and self.strategy == 'rb':
-            if len(self.final_rewards) > 0:
-                imp = self.incumbent_perf - self.final_rewards[-1]
-            else:
-                imp = self.incumbent_perf - self.optimizer['fe'].baseline_score
-            assert imp >= 0.
-            self.imp_rewards[_arm].append(imp)
-
-    def prepare_optimizer(self, _arm):
-        if _arm == 'fe':
-            if self.update_flag[_arm] is True:
-                # Build the Feature Engineering component.
-                fe_evaluator = Evaluator(self.inc['hpo'], name='fe', resampling_strategy=self.evaluation_type,
-                                         seed=self.seed)
-                self.optimizer[_arm] = EvaluationBasedOptimizer(
-                    self.inc['fe'], fe_evaluator,
-                    self.classifier_id, self.per_run_time_limit, self.per_run_mem_limit, self.seed,
-                    shared_mode=self.share_fe
-                )
-            else:
-                self.logger.info('No improvement on HPO, so use the old FE optimizer!')
-        else:
-            if self.update_flag[_arm] is True:
-                trials_per_iter = self.optimizer['fe'].evaluation_num_last_iteration
-                hpo_evaluator = Evaluator(self.config_space.get_default_configuration(),
-                                          data_node=self.inc['fe'],
-                                          name='hpo',
-                                          resampling_strategy=self.evaluation_type,
-                                          seed=self.seed)
-                self.optimizer[_arm] = SMACOptimizer(
-                    hpo_evaluator, self.config_space, output_dir=self.output_dir,
-                    per_run_time_limit=self.per_run_time_limit,
-                    trials_per_iter=trials_per_iter // 2, seed=self.seed
-                )
-            else:
-                self.logger.info('No improvement on FE, so use the old HPO optimizer!')
+        # if _arm == 'fe':
+        #     _num_iter = self.optimizer['fe'].evaluation_num_last_iteration // 2
+        #     self.optimizer['hpo'].trials_per_iter = max(_num_iter, 1)
 
     def optimize(self):
         # First pull each arm #sliding_window_size times.
@@ -191,54 +148,24 @@ class SecondLayerBandit(object):
                 arm_picked = 'fe' if self.action_sequence[-1] == 'hpo' else 'hpo'
             else:
                 arm_picked = self.arms[np.argmax(imp_values)]
-            self.action_sequence.append(arm_picked)
 
+            # Early stopping scenario.
+            if self.optimizer[arm_picked].early_stopped_flag is True:
+                arm_picked = 'hpo' if arm_picked == 'fe' else 'fe'
+                if self.optimizer[arm_picked].early_stopped_flag is True:
+                    self.early_stopped_flag = True
+                    return
+
+            self.action_sequence.append(arm_picked)
             self.logger.info('Pulling arm: %s for %s at %d-th round' % (arm_picked, self.classifier_id, self.pull_cnt))
             results = self.optimizer[arm_picked].iterate()
             self.collect_iter_stats(arm_picked, results)
             self.pull_cnt += 1
 
-    def choose_arm(self):
-        # First pull each arm #sliding_window_size times.
-        if self.pull_cnt < len(self.arms) * self.sliding_window_size:
-            arm_picked = self.arms[self.pull_cnt % 2]
-            # if _arm == 'fe' and len(self.final_rewards) == 0:
-            #     self.final_rewards.append(self.optimizer['fe'].baseline_score)
-        else:
-            imp_values = list()
-            for _arm in self.arms:
-                if self.mth == 'rb':
-                    increasing_rewards = get_increasing_sequence(self.rewards[_arm])
-                    impv = list()
-                    for idx in range(1, len(increasing_rewards)):
-                        impv.append(increasing_rewards[idx] - increasing_rewards[idx - 1])
-                    imp_values.append(np.mean(impv[-self.sliding_window_size:]))
-                elif self.mth == 'alter' and self.strategy == 'rb':
-                    imp_values.append(np.mean(self.imp_rewards[_arm][-self.sliding_window_size:]))
-                else:
-                    raise ValueError('Invalid parameters!')
-
-            self.logger.info('Imp values: %s' % imp_values)
-            if imp_values[0] == imp_values[1]:
-                # Break ties randomly.
-                self.logger.info('Same Imp values: %s' % imp_values)
-                arm_picked = 'fe' if self.action_sequence[-1] == 'hpo' else 'hpo'
-                # arm_picked = np.random.choice(self.arms, 1)[0]
-            else:
-                self.logger.info('Different Imp values: %s' % imp_values)
-                arm_picked = self.arms[np.argmax(imp_values)]
-        return arm_picked
-
     def optimize_alternatedly(self):
         # First choose one arm.
-        if self.strategy == 'avg':
-            _arm = self.arms[self.pull_cnt % 2]
-        else:
-            _arm = self.choose_arm()
+        _arm = self.arms[self.pull_cnt % 2]
         self.logger.info('Pulling arm: %s for %s at %d-th round' % (_arm, self.classifier_id, self.pull_cnt))
-
-        self.prepare_optimizer(_arm)
-
         # Execute one iteration.
         results = self.optimizer[_arm].iterate()
 
@@ -247,29 +174,27 @@ class SecondLayerBandit(object):
         self.pull_cnt += 1
 
     def play_once(self):
+        if self.early_stopped_flag:
+            return self.incumbent_perf
+
         if self.mth == 'rb':
             self.optimize()
-            _perf = None
-
-            @timeout(300)
-            def evaluate():
-                perf = Evaluator(
-                    self.local_inc['hpo'], data_node=self.local_inc['fe'],
-                    name='fe', resampling_strategy=self.evaluation_type,
-                    seed=self.seed)(self.local_inc['hpo'])
-                return perf
-
-            try:
-                _perf = evaluate()
-
-            except Exception as e:
-                self.logger.error(str(e))
-            if _perf is None:
-                _perf = 0.0
-            if _perf > self.incumbent_perf:
-                self.inc['hpo'] = self.local_inc['hpo']
-                self.inc['fe'] = self.local_inc['fe']
-                self.incumbent_perf = _perf
+            if self.enable_intersection:
+                # Update join incumbent from FE and HPO.
+                _perf = None
+                try:
+                    with time_limit(600):
+                        _perf = Evaluator(
+                            self.local_inc['hpo'], data_node=self.local_inc['fe'],
+                            name='fe', resampling_strategy=self.evaluation_type,
+                            seed=self.seed)(self.local_inc['hpo'])
+                except Exception as e:
+                    self.logger.error(str(e))
+                # Update INC.
+                if _perf is not None and _perf > self.incumbent_perf:
+                    self.inc['hpo'] = self.local_inc['hpo']
+                    self.inc['fe'] = self.local_inc['fe']
+                    self.incumbent_perf = _perf
         elif self.mth == 'alter':
             self.optimize_alternatedly()
         else:
@@ -289,3 +214,70 @@ class SecondLayerBandit(object):
             _node.depth = node.depth
             fe_optimizer.global_datanodes.append(_node)
         fe_optimizer.refresh_beam_set()
+
+    def predict_proba(self, X_test, is_weighted=False):
+        """
+            weight source: ...
+            model 1: local_inc['fe'], default_hpo
+            model 2: default_fe, local_inc['hpo']
+            model 3: local_inc['fe'], local_inc['hpo']
+        :param X_test:
+        :param is_weighted:
+        :return:
+        """
+        X_train_ori, y_train_ori = self.original_data.data
+        X_train_inc, y_train_inc = self.local_inc['fe'].data
+
+        model1_clf = fetch_predict_estimator(self.default_config, X_train_inc, y_train_inc)
+        model2_clf = fetch_predict_estimator(self.local_inc['hpo'], X_train_ori, y_train_ori)
+        model3_clf = fetch_predict_estimator(self.local_inc['hpo'], X_train_inc, y_train_inc)
+        model4_clf = fetch_predict_estimator(self.default_config, X_train_ori, y_train_ori)
+
+        if is_weighted:
+            # Based on performance on the validation set
+            # TODO: Save the results so that the models will not be trained again
+            from sklearn.model_selection import train_test_split
+            from automlToolkit.components.ensemble.ensemble_selection import EnsembleSelection
+            from autosklearn.metrics import balanced_accuracy
+            sss = StratifiedShuffleSplit(n_splits=1, test_size=0.33, random_state=1)
+            X, y = X_train_ori.copy(), y_train_ori.copy()
+            _X, _y = X_train_inc.copy(), y_train_inc.copy()
+            for train_index, test_index in sss.split(X, y):
+                X_train, X_val, y_train, y_val = X[train_index], X[test_index], y[train_index], y[test_index]
+                _X_train, _X_val, _y_train, _y_val = _X[train_index], _X[test_index], _y[train_index], _y[test_index]
+
+            assert (y_val == _y_val).all()
+            model1_clf_temp = fetch_predict_estimator(self.default_config, _X_train, _y_train)
+            model2_clf_temp = fetch_predict_estimator(self.local_inc['hpo'], X_train, y_train)
+            model3_clf_temp = fetch_predict_estimator(self.local_inc['hpo'], _X_train, _y_train)
+            model4_clf_temp = fetch_predict_estimator(self.default_config, X_train, y_train)
+            pred1 = model1_clf_temp.predict_proba(_X_val)
+            pred2 = model2_clf_temp.predict_proba(X_val)
+            pred3 = model3_clf_temp.predict_proba(_X_val)
+            pred4 = model4_clf_temp.predict_proba(X_val)
+
+            # Ensemble size is a hyperparameter
+            es = EnsembleSelection(ensemble_size=20, task_type=1, metric=balanced_accuracy,
+                                   random_state=np.random.RandomState(self.seed))
+            es.fit([pred1, pred2, pred3, pred4], y_val, None)
+            weights = es.weights_
+            print("weights " + str(weights))
+
+        # Make sure that the estimator has "predict_proba"
+        _test_node = DataNode(data=[X_test, None], feature_type=self.original_data.feature_types.copy())
+        _X_test = self.optimizer['fe'].apply(_test_node, self.local_inc['fe']).data[0]
+        pred1 = model1_clf.predict_proba(_X_test)
+        pred2 = model2_clf.predict_proba(X_test)
+        pred3 = model3_clf.predict_proba(_X_test)
+        pred4 = model4_clf.predict_proba(X_test)
+
+        if is_weighted:
+            final_pred = weights[0] * pred1 + weights[1] * pred2 + weights[2] * pred3 + weights[3] * pred4
+        else:
+            final_pred = (pred1 + pred2 + pred3 + pred4) / 4
+
+        return final_pred
+
+    def predict(self, X_test, is_weighted=False):
+        proba_pred = self.predict_proba(X_test, is_weighted)
+        return np.argmax(proba_pred, axis=-1)

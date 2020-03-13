@@ -1,42 +1,49 @@
 import time
+import numpy as np
 from concurrent.futures import ThreadPoolExecutor
 from collections import namedtuple
 from automlToolkit.components.feature_engineering.transformation_graph import *
 from automlToolkit.components.fe_optimizers.base_optimizer import Optimizer
 from automlToolkit.components.fe_optimizers.transformer_manager import TransformerManager
-from automlToolkit.components.evaluator import Evaluator
-from automlToolkit.components.utils.constants import SUCCESS, ERROR, TIMEOUT, MEMORYOUT, CRASHED
+from automlToolkit.components.evaluators.evaluator import Evaluator
+from automlToolkit.components.utils.constants import SUCCESS, ERROR, TIMEOUT, CLASSIFICATION, REGRESSION
 from automlToolkit.utils.decorators import time_limit, TimeoutException
+from automlToolkit.components.feature_engineering import TRANS_CANDIDATES
 
 EvaluationResult = namedtuple('EvaluationResult', 'status duration score extra')
 
 
 class EvaluationBasedOptimizer(Optimizer):
-    def __init__(self, input_data: DataNode, evaluator: Evaluator,
+    def __init__(self, task_type, input_data: DataNode, evaluator: Evaluator,
                  model_id: str, time_limit_per_trans: int,
                  mem_limit_per_trans: int,
                  seed: int, shared_mode: bool = False,
-                 batch_size: int = 2, beam_width: int = 3, n_jobs=1):
-        super().__init__(str(__class__.__name__), input_data, seed)
+                 batch_size: int = 2, beam_width: int = 3, n_jobs=1, trans_set=None):
+        super().__init__(str(__class__.__name__), task_type, input_data, seed)
         self.transformer_manager = TransformerManager(random_state=seed)
         self.time_limit_per_trans = time_limit_per_trans
         self.mem_limit_per_trans = mem_limit_per_trans
         self.evaluator = evaluator
         self.model_id = model_id
-        self.incumbent_score = -1.
-        self.baseline_score = -1.
+        self.incumbent_score = -np.inf
+        self.baseline_score = -np.inf
         self.start_time = time.time()
         self.hp_config = None
         self.n_jobs = n_jobs
+        self.early_stopped_flag = False
 
         # Parameters in beam search.
         self.hpo_batch_size = batch_size
         self.beam_width = beam_width
-        self.max_depth = 6  # old value=8
-        self.trans_types = [0, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19]
+        self.max_depth = 6
+        if trans_set is None:
+            self.trans_types = TRANS_CANDIDATES[self.task_type]
+        else:
+            self.trans_types = trans_set
         # Debug Example:
+        # self.trans_types = [0, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19]
         # self.trans_types = [5, 9, 10]
-
+        # self.trans_types = [30, 31]
         self.iteration_id = 0
         self.evaluation_count = 0
         self.beam_set = list()
@@ -56,17 +63,21 @@ class EvaluationBasedOptimizer(Optimizer):
         # Avoid transformations, which would take too long
         # Combinations of non-linear models with feature learning.
         # feature_learning = ["kitchen_sinks", "kernel_pca", "nystroem_sampler"]
-        classifier_set = ["adaboost", "decision_tree", "extra_trees",
-                          "gradient_boosting", "k_nearest_neighbors",
-                          "libsvm_svc", "random_forest", "gaussian_nb", "decision_tree"]
+        if self.task_type == 'classification':
+            classifier_set = ["adaboost", "decision_tree", "extra_trees",
+                              "gradient_boosting", "k_nearest_neighbors",
+                              "libsvm_svc", "random_forest", "gaussian_nb", "decision_tree"]
 
-        if model_id in classifier_set:
-            for tran_id in [12, 13, 15]:
-                if tran_id in self.trans_types:
-                    self.trans_types.remove(tran_id)
+            if model_id in classifier_set:
+                for tran_id in [12, 13, 15]:
+                    if tran_id in self.trans_types:
+                        self.trans_types.remove(tran_id)
+        # TODO: for regression task, the trans types should be elaborated.
 
     def optimize(self):
         while not self.is_ended:
+            if self.early_stopped_flag:
+                break
             self.logger.debug('=' * 50)
             self.logger.debug('Start the ITERATION: %d' % self.iteration_id)
             self.logger.debug('=' * 50)
@@ -86,7 +97,7 @@ class EvaluationBasedOptimizer(Optimizer):
                 self.incumbent_score = self.evaluator(self.hp_config, data_node=self.root_node, name='fe')
             except Exception as e:
                 self.logger.error('evaluating root node: %s' % str(e))
-                self.incumbent_score = 0.
+                self.incumbent_score = -np.inf
                 status = ERROR
 
             execution_status.append(EvaluationResult(status=status,
@@ -101,9 +112,13 @@ class EvaluationBasedOptimizer(Optimizer):
             _evaluation_cnt += 1
             self.beam_set.append(self.root_node)
 
-        # Get one node in the beam set.
-        node_ = self.beam_set[0]
-        del self.beam_set[0]
+        if len(self.beam_set) == 0 or self.early_stopped_flag:
+            self.early_stopped_flag = True
+            return self.incumbent.score, time.time() - _iter_start_time, self.incumbent
+        else:
+            # Get one node in the beam set.
+            node_ = self.beam_set[0]
+            del self.beam_set[0]
 
         self.logger.debug('=' * 50)
         self.logger.info('Start %d-th FE iteration.' % self.iteration_id)
@@ -121,6 +136,9 @@ class EvaluationBasedOptimizer(Optimizer):
                 node_, trans_types=_trans_types, batch_size=self.hpo_batch_size
             )
             self.logger.info('The number of transformations is: %d' % len(trans_set))
+            if len(trans_set) == 1 and trans_set[0].type == 0:
+                return self.incumbent.score, 0, self.incumbent
+
             if self.n_jobs > 1:
                 pool = ThreadPoolExecutor(max_workers=self.n_jobs)
                 for transformer in trans_set:
@@ -218,9 +236,9 @@ class EvaluationBasedOptimizer(Optimizer):
                     try:
                         # Limit the execution and evaluation time for each transformation.
                         with time_limit(self.time_limit_per_trans):
-                            self.logger.debug('%s - %s' % (transformer.name, str(node_.shape)))
+                            self.logger.info('%s - %s' % (transformer.name, str(node_.shape)))
                             output_node = transformer.operate(node_)
-                            self.logger.debug('after %s - %s' % (transformer.name, str(output_node.shape)))
+                            self.logger.info('after %s - %s' % (transformer.name, str(output_node.shape)))
 
                             # Evaluate this node.
                             if transformer.type != 0:
