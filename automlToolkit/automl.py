@@ -43,6 +43,7 @@ class AutoML(object):
         self.solvers = dict()
         self.task_type = task_type
         self.es = None
+        self.best_perf = float("-INF")
         if include_algorithms is not None:
             self.include_algorithms = include_algorithms
         else:
@@ -155,10 +156,9 @@ class AutoML(object):
             self.es.fit(data=train_data)
         else:
             best_algo_id = None
-            best_perf = float("-INF")
             for algo_id in self.include_algorithms:
-                if self.solvers[algo_id].incumbent_perf > best_perf:
-                    best_perf = self.solvers[algo_id].incumbent_perf
+                if self.solvers[algo_id].incumbent_perf > self.best_perf:
+                    self.best_perf = self.solvers[algo_id].incumbent_perf
                     best_algo_id = algo_id
 
             self.best_data_node = self.solvers[best_algo_id].inc['fe']
