@@ -60,9 +60,8 @@ class AutoML(object):
         stats = dict()
         stats['include_algorithms'] = self.include_algorithms
         stats['split_seed'] = self.seed
-        best_perf = float('-INF')
         for algo_id in self.include_algorithms:
-            best_perf = max(best_perf, self.solvers[algo_id].incumbent_perf)
+            self.best_perf = max(self.best_perf, self.solvers[algo_id].incumbent_perf)
         for algo_id in self.include_algorithms:
             data = dict()
             fe_optimizer = self.solvers[algo_id].optimizer['fe']
@@ -86,9 +85,9 @@ class AutoML(object):
             best_configs = self.solvers[algo_id].local_hist['hpo']
             best_configs = list(set(best_configs))
             if self.metric._sign > 0:
-                threshold = best_perf * threshold
+                threshold = self.best_perf * threshold
             else:
-                threshold = best_perf / threshold
+                threshold = self.best_perf / threshold
 
             for idx in np.argsort(-np.array(perfs)):
                 if perfs[idx] >= threshold and configs[idx] not in best_configs:
