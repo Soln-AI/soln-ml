@@ -272,8 +272,7 @@ if __name__ == "__main__":
             for run_id in range(start_id, start_id + rep):
                 seed = int(seeds[run_id])
                 if mth == 'hmab':
-                    # for ens in [None, 'bagging', 'stacking', 'ensemble_selection']:
-                    for ens in [None, 'bagging']:
+                    for ens in [None, 'bagging', 'stacking', 'ensemble_selection']:
                         time_cost = evaluate_hmab(algorithms, run_id, dataset, time_limit=time_limit, ens_method=ens)
                 elif mth == 'ausk':
                     time_cost = time_costs[run_id - start_id]
