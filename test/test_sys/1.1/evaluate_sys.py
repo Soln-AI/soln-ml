@@ -16,6 +16,7 @@ dataset_set = 'yeast,vehicle,diabetes,spectf,credit,' \
               'ionosphere,lymphography,messidor_features,winequality_red,fri_c1'
 parser.add_argument('--datasets', type=str, default=dataset_set)
 parser.add_argument('--methods', type=str, default='hmab,ausk')
+parser.add_argument('--ens', type=str, default="None,bagging,ensemble_selection,stacking")
 parser.add_argument('--rep_num', type=int, default=5)
 parser.add_argument('--start_id', type=int, default=0)
 parser.add_argument('--time_costs', type=int, default='600')
@@ -27,7 +28,7 @@ if not os.path.exists(save_dir):
 per_run_time_limit = 300
 
 
-def evaluate_hmab(algorithms, run_id, dataset='credit', time_limit=600, ens_method=None):
+def evaluate_hmab(algorithms, run_id, dataset='credit', time_limit=600, ens_method=None, ens_size=20):
     algo = algorithms.copy()
     algo.append('lightgbm')
     task_id = '%s-hmab-%d-%d-%s' % (dataset, len(algo), time_limit, str(ens_method))
@@ -35,7 +36,7 @@ def evaluate_hmab(algorithms, run_id, dataset='credit', time_limit=600, ens_meth
     raw_data, test_raw_data = load_train_test_data(dataset)
     clf = Classifier(metric='acc', time_limit=time_limit,
                      iter_num_per_algo=100, include_algorithms=algo,
-                     ensemble_method=ens_method, ensemble_size=20,
+                     ensemble_method=ens_method, ensemble_size=ens_size,
                      per_run_time_limit=per_run_time_limit, random_state=run_id)
     clf.fit(raw_data)
     time_cost = int(time.time() - _start_time)
@@ -246,6 +247,7 @@ if __name__ == "__main__":
     start_id = args.start_id
     rep = args.rep_num
     methods = args.methods.split(',')
+    ens_list = args.ens.split(',')
     time_limit = args.time_costs
 
     # Prepare random seeds.
@@ -272,8 +274,15 @@ if __name__ == "__main__":
             for run_id in range(start_id, start_id + rep):
                 seed = int(seeds[run_id])
                 if mth == 'hmab':
-                    for ens in [None, 'bagging', 'stacking', 'ensemble_selection']:
-                        time_cost = evaluate_hmab(algorithms, run_id, dataset, time_limit=time_limit, ens_method=ens)
+                    for ens in ens_list:
+                        if ens == 'None':
+                            ens = None
+                        if ens in ['bagging', 'stacking']:
+                            ens_size = 6
+                        else:
+                            ens_size = 20
+                        time_cost = evaluate_hmab(algorithms, run_id, dataset, time_limit=time_limit, ens_method=ens,
+                                                  ens_size=ens_size)
                 elif mth == 'ausk':
                     time_cost = time_costs[run_id - start_id]
                     evaluate_autosklearn(algorithms, run_id, dataset, time_cost)
