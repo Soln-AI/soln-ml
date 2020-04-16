@@ -305,10 +305,10 @@ if __name__ == "__main__":
                     with open(file_path, 'rb') as f:
                         data = pickle.load(f)
                     if mth == 'hmab':
-                        val_acc, test_acc1, test_acc2, test_acc3, test_acc4 = data
+                        val_acc, test_acc1, test_acc2, test_acc3, test_acc4, _ = data
                         results.append([val_acc, test_acc1, test_acc2, test_acc3, test_acc4])
                     else:
-                        val_acc, test_acc = data
+                        val_acc, test_acc, _ = data
                         results.append([val_acc, test_acc])
 
                 if len(results) == rep:
