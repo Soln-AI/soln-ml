@@ -142,46 +142,60 @@ class AutoML(object):
                 if solver.early_stopped_flag:
                     break
 
-        if self.ensemble_method is not None:
-            self.stats = self.fetch_ensemble_members()
-            # Ensembling all intermediate/ultimate models found in above optimization process.
-            # TODO: version1.0, support multiple ensemble methods.
-            self.es = EnsembleBuilder(stats=self.stats,
-                                      ensemble_method=self.ensemble_method,
-                                      ensemble_size=self.ensemble_size,
-                                      task_type=self.task_type,
-                                      metric=self.metric,
-                                      output_dir=self.output_dir)
-            self.es.fit(data=train_data)
-        else:
-            best_algo_id = None
-            for algo_id in self.include_algorithms:
-                if self.solvers[algo_id].incumbent_perf > self.best_perf:
-                    self.best_perf = self.solvers[algo_id].incumbent_perf
-                    best_algo_id = algo_id
+        self.stats = self.fetch_ensemble_members()
+        # Ensembling all intermediate/ultimate models found in above optimization process.
+        # TODO: version1.0, support multiple ensemble methods.
+        self.bagging = EnsembleBuilder(stats=self.stats,
+                                       ensemble_method='bagging',
+                                       ensemble_size=6,
+                                       task_type=self.task_type,
+                                       metric=self.metric,
+                                       output_dir=self.output_dir)
+        self.bagging.fit(data=train_data)
+        self.stacking = EnsembleBuilder(stats=self.stats,
+                                        ensemble_method='stacking',
+                                        ensemble_size=6,
+                                        task_type=self.task_type,
+                                        metric=self.metric,
+                                        output_dir=self.output_dir)
+        self.stacking.fit(data=train_data)
+        self.es = EnsembleBuilder(stats=self.stats,
+                                  ensemble_method='ensemble_selection',
+                                  ensemble_size=20,
+                                  task_type=self.task_type,
+                                  metric=self.metric,
+                                  output_dir=self.output_dir)
+        self.es.fit(data=train_data)
+        best_algo_id = None
+        best_perf = float("-INF")
+        for algo_id in self.include_algorithms:
+            if self.solvers[algo_id].incumbent_perf > best_perf:
+                best_perf = self.solvers[algo_id].incumbent_perf
+                best_algo_id = algo_id
 
-            self.best_data_node = self.solvers[best_algo_id].inc['fe']
-            self.fe_optimizer = self.solvers[best_algo_id].optimizer['fe']
-            best_config = self.solvers[best_algo_id].inc['hpo']
-            best_estimator = fetch_predict_estimator(self.task_type, best_config, self.best_data_node.data[0],
-                                                     self.best_data_node.data[1])
-            with open(os.path.join(self.output_dir, 'best_model'), 'wb') as f:
-                pkl.dump(best_estimator, f)
+        self.best_data_node = self.solvers[best_algo_id].inc['fe']
+        self.fe_optimizer = self.solvers[best_algo_id].optimizer['fe']
+        best_config = self.solvers[best_algo_id].inc['hpo']
+        best_estimator = fetch_predict_estimator(self.task_type, best_config, self.best_data_node.data[0],
+                                                 self.best_data_node.data[1])
+        with open(os.path.join(self.output_dir, 'best_model'), 'wb') as f:
+            pkl.dump(best_estimator, f)
 
     def _predict(self, test_data: DataNode, batch_size=None, n_jobs=1):
-        # TODO: Single model
-        if self.ensemble_method is not None:
-            if self.es is None:
-                raise AttributeError("AutoML is not fitted!")
-            return self.es.predict(test_data, self.solvers)
+        if self.es is None:
+            raise AttributeError("AutoML is not fitted!")
+        bag_pred = self.bagging.predict(test_data, self.solvers)
+        stack_pred = self.stacking.predict(test_data, self.solvers)
+        es_pred = self.es.predict(test_data, self.solvers)
+
+        test_data_node = self.fe_optimizer.apply(test_data, self.best_data_node)
+        with open(os.path.join(self.output_dir, 'best_model'), 'rb') as f:
+            estimator = pkl.load(f)
+        if self.task_type in CLS_TASKS:
+            best_pred = estimator.predict_proba(test_data_node.data[0])
         else:
-            test_data_node = self.fe_optimizer.apply(test_data, self.best_data_node)
-            with open(os.path.join(self.output_dir, 'best_model'), 'rb') as f:
-                estimator = pkl.load(f)
-            if self.task_type in CLS_TASKS:
-                return estimator.predict_proba(test_data_node.data[0])
-            else:
-                return estimator.predict(test_data_node.data[0])
+            best_pred = estimator.predict(test_data_node.data[0])
+        return best_pred, bag_pred, stack_pred, es_pred
 
     def predict_proba(self, test_data: DataNode, batch_size=None, n_jobs=1):
         if self.task_type in REG_TASKS:
@@ -190,7 +204,8 @@ class AutoML(object):
 
     def predict(self, test_data: DataNode, batch_size=None, n_jobs=1):
         if self.task_type in CLS_TASKS:
-            pred = self._predict(test_data)
-            return np.argmax(pred, axis=-1)
+            pred1, pred2, pred3, pred4 = self._predict(test_data)
+            return np.argmax(pred1, axis=-1), np.argmax(pred2, axis=-1), np.argmax(pred3, axis=-1), np.argmax(pred4,
+                                                                                                              axis=-1)
         else:
             return self._predict(test_data, batch_size=batch_size)
