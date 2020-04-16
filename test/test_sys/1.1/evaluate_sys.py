@@ -301,34 +301,35 @@ if __name__ == "__main__":
             row_data = [dataset]
             for mth in method_ids:
                 results = list()
-                for run_id in range(rep):
-                    task_id = '%s-%s-%d-%d' % (dataset, mth, len(algorithms), time_limit)
-                    file_path = save_dir + '%s-%d.pkl' % (task_id, run_id)
-                    if not os.path.exists(file_path):
-                        continue
-                    with open(file_path, 'rb') as f:
-                        data = pickle.load(f)
-                    val_acc, test_acc, _tmp = data
-                    results.append([val_acc, test_acc])
-                if len(results) == rep:
-                    results = np.array(results)
-                    stats_ = zip(np.mean(results, axis=0), np.std(results, axis=0))
-                    string = ''
-                    for mean_t, std_t in stats_:
-                        string += u'%.3f\u00B1%.3f |' % (mean_t, std_t)
-                    print(dataset, mth, '=' * 30)
-                    print('%s-%s: mean\u00B1std' % (dataset, mth), string)
-                    print('%s-%s: median' % (dataset, mth), np.median(results, axis=0))
+                for ens in ens_list:
+                    for run_id in range(rep):
+                        task_id = '%s-%s-%d-%d-%s' % (dataset, mth, len(algorithms), time_limit, str(ens))
+                        file_path = save_dir + '%s-%d.pkl' % (task_id, run_id)
+                        if not os.path.exists(file_path):
+                            continue
+                        with open(file_path, 'rb') as f:
+                            data = pickle.load(f)
+                        val_acc, test_acc, _tmp = data
+                        results.append([val_acc, test_acc])
+                    if len(results) == rep:
+                        results = np.array(results)
+                        stats_ = zip(np.mean(results, axis=0), np.std(results, axis=0))
+                        string = ''
+                        for mean_t, std_t in stats_:
+                            string += u'%.3f\u00B1%.3f |' % (mean_t, std_t)
+                        print(dataset, mth, '=' * 30)
+                        print('%s-%s: mean\u00B1std' % (dataset, mth), string)
+                        print('%s-%s: median' % (dataset, mth), np.median(results, axis=0))
 
-                    for idx in range(results.shape[1]):
-                        vals = results[:, idx]
-                        median = np.median(vals)
-                        if median == 0.:
-                            row_data.append('-')
-                        else:
-                            row_data.append(u'%.4f' % median)
-                else:
-                    row_data.extend(['-'] * 2)
+                        for idx in range(results.shape[1]):
+                            vals = results[:, idx]
+                            median = np.median(vals)
+                            if median == 0.:
+                                row_data.append('-')
+                            else:
+                                row_data.append(u'%.4f' % median)
+                    else:
+                        row_data.extend(['-'] * 2)
 
             tbl_data.append(row_data)
         print(tabulate.tabulate(tbl_data, headers, tablefmt='github'))
