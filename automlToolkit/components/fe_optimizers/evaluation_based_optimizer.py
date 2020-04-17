@@ -176,6 +176,7 @@ class EvaluationBasedOptimizer(Optimizer):
                     else:
                         self.temporary_nodes.append(output_node)
                         self.graph.add_node(output_node)
+                        print(output_node.node_id)
                         # Avoid self-loop.
                         if transformer.type != 0 and node_.node_id != output_node.node_id:
                             self.graph.add_trans_in_graph(node_, output_node, transformer)
