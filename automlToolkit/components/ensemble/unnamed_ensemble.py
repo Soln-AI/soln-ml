@@ -23,6 +23,8 @@ def choose_base_models_regression(predictions, labels, num_model):
 
 
 def choose_base_models_classification(predictions, num_model, interval=20):
+    for pred in predictions:
+        print(pred)
     num_class = predictions.shape[2]
     num_total_models = predictions.shape[0]
     base_mask = [0] * len(predictions)
@@ -38,7 +40,8 @@ def choose_base_models_classification(predictions, num_model, interval=20):
             freq_array += freq
         distribution.append(freq_array)  # Shape: (num_total_models,20*num_class)
     distribution = np.array(distribution)
-
+    for dis in distribution:
+        print(dis)
     # Apply the clustering algorithm
     model = AgglomerativeClustering(n_clusters=num_model, linkage="complete")
     cluster = model.fit(distribution)
