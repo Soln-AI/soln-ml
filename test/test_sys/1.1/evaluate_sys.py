@@ -7,6 +7,7 @@ import argparse
 import tabulate
 import autosklearn.classification
 from sklearn.metrics import accuracy_score as acc
+from sklearn.metrics.scorer import balanced_accuracy_scorer, balanced_accuracy_score
 
 sys.path.append(os.getcwd())
 from automlToolkit.estimators import Classifier
@@ -34,7 +35,7 @@ def evaluate_hmab(algorithms, run_id, dataset='credit', time_limit=600):
     task_id = '%s-hmab-%d-%d' % (dataset, len(algo), time_limit)
     _start_time = time.time()
     raw_data, test_raw_data = load_train_test_data(dataset)
-    clf = Classifier(metric='acc', time_limit=time_limit,
+    clf = Classifier(metric=balanced_accuracy_scorer, time_limit=time_limit,
                      iter_num_per_algo=100, include_algorithms=algo,
                      per_run_time_limit=per_run_time_limit, random_state=run_id)
     clf.fit(raw_data)
@@ -43,10 +44,10 @@ def evaluate_hmab(algorithms, run_id, dataset='credit', time_limit=600):
 
     validation_accuracy = clf._ml_engine.best_perf
     best_pred, bag_pred, stack_pred, es_pred = clf.predict(test_raw_data)
-    test_accuracy1 = acc(best_pred, test_raw_data.data[1])
-    test_accuracy2 = acc(bag_pred, test_raw_data.data[1])
-    test_accuracy3 = acc(stack_pred, test_raw_data.data[1])
-    test_accuracy4 = acc(es_pred, test_raw_data.data[1])
+    test_accuracy1 = balanced_accuracy_score(test_raw_data.data[1], best_pred)
+    test_accuracy2 = balanced_accuracy_score(test_raw_data.data[1], bag_pred)
+    test_accuracy3 = balanced_accuracy_score(test_raw_data.data[1], stack_pred)
+    test_accuracy4 = balanced_accuracy_score(test_raw_data.data[1], es_pred)
 
     print('Dataset          : %s' % dataset)
     print('Validation/Test score : %f - %f - %f -%f -%f' % (
@@ -100,7 +101,7 @@ def evaluate_autosklearn(algorithms, rep_id,
         initial_configurations_via_metalearning=init_config_via_metalearning,
         seed=int(rep_id),
         resampling_strategy='holdout',
-        resampling_strategy_arguments={'train_size': 0.67})
+        resampling_strategy_arguments={'train_size': 0.7})
 
     print(automl)
     raw_data, test_raw_data = load_train_test_data(dataset)
@@ -108,7 +109,8 @@ def evaluate_autosklearn(algorithms, rep_id,
     X_test, y_test = test_raw_data.data
     feat_type = ['Categorical' if _type == CATEGORICAL else 'Numerical'
                  for _type in raw_data.feature_types]
-    automl.fit(X.copy(), y.copy(), feat_type=feat_type)
+    from autosklearn.metrics import balanced_accuracy
+    automl.fit(X.copy(), y.copy(), metric=balanced_accuracy, feat_type=feat_type)
     model_desc = automl.show_models()
     str_stats = automl.sprint_statistics()
     valid_results = automl.cv_results_['mean_test_score']
@@ -117,7 +119,7 @@ def evaluate_autosklearn(algorithms, rep_id,
     # Test performance.
     automl.refit(X.copy(), y.copy())
     predictions = automl.predict(X_test)
-    test_accuracy = acc(y_test, predictions)
+    test_accuracy = balanced_accuracy_score(y_test, predictions)
 
     # Print statistics about the auto-sklearn run such as number of
     # iterations, number of models failed with a time out.
