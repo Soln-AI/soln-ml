@@ -298,7 +298,7 @@ if __name__ == "__main__":
             row_data = [dataset]
             for mth in method_ids:
                 results = list()
-                for run_id in range(rep):
+                for run_id in range(start_id, start_id + rep):
                     task_id = '%s-%s-%d-%d' % (dataset, mth, len(algorithms) + 1, time_limit)
                     file_path = save_dir + '%s-%d.pkl' % (task_id, run_id)
                     print(file_path)
