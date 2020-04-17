@@ -147,14 +147,14 @@ class AutoML(object):
         # TODO: version1.0, support multiple ensemble methods.
         self.bagging = EnsembleBuilder(stats=self.stats,
                                        ensemble_method='bagging',
-                                       ensemble_size=6,
+                                       ensemble_size=4,
                                        task_type=self.task_type,
                                        metric=self.metric,
                                        output_dir=self.output_dir)
         self.bagging.fit(data=train_data)
         self.stacking = EnsembleBuilder(stats=self.stats,
                                         ensemble_method='stacking',
-                                        ensemble_size=6,
+                                        ensemble_size=4,
                                         task_type=self.task_type,
                                         metric=self.metric,
                                         output_dir=self.output_dir)

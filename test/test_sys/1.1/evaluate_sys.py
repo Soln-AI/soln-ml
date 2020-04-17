@@ -35,7 +35,7 @@ def evaluate_hmab(algorithms, run_id, dataset='credit', time_limit=600):
     task_id = '%s-hmab-%d-%d' % (dataset, len(algo), time_limit)
     _start_time = time.time()
     raw_data, test_raw_data = load_train_test_data(dataset)
-    clf = Classifier(metric=balanced_accuracy_scorer, time_limit=time_limit,
+    clf = Classifier(metric=balanced_accuracy_scorer, time_limit=time_limit, evaluation='cv',
                      iter_num_per_algo=100, include_algorithms=algo,
                      per_run_time_limit=per_run_time_limit, random_state=run_id)
     clf.fit(raw_data)
@@ -100,8 +100,9 @@ def evaluate_autosklearn(algorithms, rep_id,
         ensemble_nbest=ensemble_nbest,
         initial_configurations_via_metalearning=init_config_via_metalearning,
         seed=int(rep_id),
-        resampling_strategy='holdout',
-        resampling_strategy_arguments={'train_size': 0.7})
+        resampling_strategy='cv',
+        resampling_strategy_arguments={'folds': 5}
+    )
 
     print(automl)
     raw_data, test_raw_data = load_train_test_data(dataset)
