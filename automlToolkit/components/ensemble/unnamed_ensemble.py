@@ -23,8 +23,6 @@ def choose_base_models_regression(predictions, labels, num_model):
 
 
 def choose_base_models_classification(predictions, num_model, interval=20):
-    for pred in predictions:
-        print(pred)
     num_class = predictions.shape[2]
     num_total_models = predictions.shape[0]
     base_mask = [0] * len(predictions)

@@ -180,11 +180,9 @@ class AutoML(object):
         print(self.best_data_node.data[0])
         print("Best node shape: %s" % str(self.best_data_node.data[0].shape))
         _train_data = self.fe_optimizer.apply(train_data, self.best_data_node)
-        print(_train_data.data[0])
         print("Applied node shape: %s" % str(_train_data.data[0].shape))
 
         _train_data = self.fe_optimizer.apply(train_data, self.best_data_node)
-        print(_train_data.data[0])
         print("Another applied node shape: %s" % str(_train_data.data[0].shape))
         assert _train_data == self.best_data_node
 
