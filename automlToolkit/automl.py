@@ -175,6 +175,19 @@ class AutoML(object):
 
         self.best_data_node = self.solvers[best_algo_id].inc['fe']
         self.fe_optimizer = self.solvers[best_algo_id].optimizer['fe']
+        print("Best arm: %s" % best_algo_id)
+        print("Best node id: %d" % self.best_data_node.node_id)
+        print(self.best_data_node.data[0])
+        print("Best node shape: %s" % str(self.best_data_node.data[0].shape))
+        _train_data = self.fe_optimizer.apply(train_data, self.best_data_node)
+        print(_train_data.data[0])
+        print("Applied node shape: %s" % str(_train_data.data[0].shape))
+
+        _train_data = self.fe_optimizer.apply(train_data, self.best_data_node)
+        print(_train_data.data[0])
+        print("Another applied node shape: %s" % str(_train_data.data[0].shape))
+        assert _train_data == self.best_data_node
+
         best_config = self.solvers[best_algo_id].inc['hpo']
         best_estimator = fetch_predict_estimator(self.task_type, best_config, self.best_data_node.data[0],
                                                  self.best_data_node.data[1])

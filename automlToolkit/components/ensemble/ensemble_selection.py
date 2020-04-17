@@ -203,6 +203,7 @@ class EnsembleSelection(BaseEnsembleModel):
                 test_node = solvers[algo_id].optimizer['fe'].apply(data, train_node)
                 X_test, _ = test_node.data
                 for _ in self.stats[algo_id]['configurations']:
+                    print("Current model cnt: %d" % cur_idx)
                     with open(os.path.join(self.output_dir, 'model%d' % cur_idx), 'rb') as f:
                         estimator = pkl.load(f)
                         if self.task_type in CLS_TASKS:

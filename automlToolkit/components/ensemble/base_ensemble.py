@@ -36,9 +36,12 @@ class BaseEnsembleModel(object):
         for algo_id in self.stats["include_algorithms"]:
             train_list = self.stats[algo_id]['train_data_list']
             configs = self.stats[algo_id]['configurations']
+            print("Algo: " + str(algo_id))
+
             for idx in range(len(train_list)):
                 X, y = train_list[idx].data
-
+                print("Current node node id: " + str(train_list[idx].node_id))
+                print("Current node shape: " + str(X.shape))
                 # TODO: Hyperparameter
                 test_size = 0.2
 
@@ -57,6 +60,7 @@ class BaseEnsembleModel(object):
                     self.train_labels = y_valid
 
                 for _config in configs:
+                    print("Current model cnt: " + str(self.model_cnt))
                     self.config_list.append(_config)
                     self.train_data_dict[self.model_cnt] = (X, y)
                     estimator = fetch_predict_estimator(self.task_type, _config, X_train, y_train)
